@@ -17,7 +17,7 @@ class ConfigTests(unittest.TestCase):
             {
                 "DATABASE_PATH": "tmp/test.sqlite3",
                 "UPLOAD_DIR": "tmp/uploads",
-                "AI_PROVIDER": "openai",
+                "CONTENT_FACTORY_PROVIDER": "openai",
                 "HOST": "0.0.0.0",
                 "PORT": "8123",
             }

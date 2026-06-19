@@ -210,3 +210,23 @@ PYTHONPYCACHEPREFIX=/private/tmp/codex_pycache python3 -m compileall content_fac
 - 接产品库、素材库、Benchmark 拆解库的更完整管理能力。
 - 接投放数据回传。
 - 接自动评分、素材复用和下一轮迭代策略。
+
+## OpenAI Provider 使用说明
+
+系统默认仍然使用 `MockAIProvider`，适合本地开发和自动化测试，不会调用真实 OpenAI API：
+
+```bash
+CONTENT_FACTORY_PROVIDER=mock
+```
+
+开启真实 OpenAI 模式需要设置：
+
+```bash
+CONTENT_FACTORY_PROVIDER=openai
+OPENAI_API_KEY=你的真实密钥
+OPENAI_MODEL=gpt-4.1-mini
+```
+
+不要提交真实 API key。`CONTENT_FACTORY_PROVIDER=openai` 但缺少 `OPENAI_API_KEY` 时，系统会返回清晰配置错误。
+
+OpenAIProvider 会要求 LLM 返回结构化 JSON；测试使用 fake client，不调用真实 API。正式素材语言仍支持 `pt-BR` / `es` / `en` / `zh`，红线命中时仍返回 `BLOCKED`，不生成正式素材内容。

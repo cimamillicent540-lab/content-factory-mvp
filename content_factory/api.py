@@ -3,9 +3,9 @@ import json
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from content_factory.ai_provider import MockAIProvider
 from content_factory.config import load_settings
 from content_factory.db import connect, init_db
+from content_factory.provider_factory import create_provider
 from content_factory.services import (
     get_generation_result,
     record_performance_feedback,
@@ -21,7 +21,7 @@ class ContentFactoryAPI:
     def __init__(self, database_path):
         self.conn = connect(database_path)
         init_db(self.conn)
-        self.provider = MockAIProvider()
+        self.provider = create_provider()
 
     def handle(self, method, path, payload=None):
         if method == "GET" and path == "/":
