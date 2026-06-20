@@ -7,9 +7,12 @@ BLOCKING_AUDIT_STATUSES = ("HUMAN_REQUIRED", "FATAL_FAILED")
 def run_content_pipeline(conn, provider, request):
     product_id = _create_product(conn, request)
     product = _row_to_dict(fetch_one(conn, "SELECT * FROM products WHERE id = ?", (product_id,)))
+    product["audience"] = request.get("目标人群", "")
 
     raw_demand = request.get("需求") or _build_raw_demand(request)
     structured = provider.structure_demand(raw_demand, product)
+    if request.get("目标人群"):
+        structured["人群"] = request["目标人群"]
     structured["语言"] = request.get("语言", "中文")
     demand_id = insert_record(
         conn,
@@ -43,6 +46,7 @@ def run_content_pipeline(conn, provider, request):
             "demand_id": demand_id,
             "audit_id": audit_id,
             "generation_id": None,
+            "结构化需求": structured,
             "素材审核": audit,
             "阻断原因": audit.get("risks") or audit.get("missing_materials", []),
         }

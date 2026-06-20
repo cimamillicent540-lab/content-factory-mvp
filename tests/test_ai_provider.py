@@ -50,6 +50,47 @@ class MockAIProviderTests(unittest.TestCase):
         self.assertIn("保证收益", " ".join(result["risks"]))
         self.assertIn("替代表达建议", result)
 
+    def test_audit_ignores_forbidden_words_inside_rule_fields(self):
+        product = dict(
+            self.product,
+            selling_points="到账快，界面清晰，新人活动",
+            campaign_rules="规则说明：不得使用 guaranteed profit、risk-free、no loss 等表达。",
+            forbidden_claims="guaranteed profit,risk-free,no loss",
+            compliance_redlines="素材审核规则：禁止 guaranteed profit。",
+        )
+        demand = {"raw_input": "给巴西新用户做一条真实功能介绍广告", "structured": {}}
+        materials = [
+            {"grade": "必须人工补充的红线素材", "name": "真实logo", "compliant": 1},
+            {"grade": "必须人工补充的红线素材", "name": "真实界面", "compliant": 1},
+            {"grade": "必须人工补充的红线素材", "name": "真实活动规则", "compliant": 1},
+        ]
+
+        result = self.provider.audit_materials(product, demand, materials)
+
+        self.assertEqual(result["status"], "PASS")
+
+    def test_audit_blocks_forbidden_words_in_formal_demand_or_selling_points(self):
+        materials = [
+            {"grade": "必须人工补充的红线素材", "name": "真实logo", "compliant": 1},
+            {"grade": "必须人工补充的红线素材", "name": "真实界面", "compliant": 1},
+            {"grade": "必须人工补充的红线素材", "name": "真实活动规则", "compliant": 1},
+        ]
+        selling_point_result = self.provider.audit_materials(
+            dict(self.product, selling_points="guaranteed profit for new users"),
+            {"raw_input": "给巴西新用户做一条真实功能介绍广告", "structured": {}},
+            materials,
+        )
+        demand_result = self.provider.audit_materials(
+            self.product,
+            {"raw_input": "Create a risk-free signup ad", "structured": {}},
+            materials,
+        )
+
+        self.assertEqual(selling_point_result["status"], "FATAL_FAILED")
+        self.assertIn("guaranteed profit", selling_point_result["risks"])
+        self.assertEqual(demand_result["status"], "FATAL_FAILED")
+        self.assertIn("risk-free", demand_result["risks"])
+
     def test_generate_content_returns_upgraded_mock_outputs(self):
         result = self.provider.generate_content(self.product, self.demand, [], [], {"status": "PASS", "summary": "素材足够"})
         self.assertIn("campaign_summary", result)
@@ -78,6 +119,73 @@ class MockAIProviderTests(unittest.TestCase):
         self.assertIn("Comece", official_text)
         self.assertNotIn("真实", official_text)
 
+    def test_generate_content_localizes_raw_english_points_for_pt_br(self):
+        product = dict(self.product, name="CopyTrade Pro", selling_points="fast deposits, clean interface, new user campaign")
+        demand = {
+            "raw_input": "Facebook Brasil 15s",
+            "structured": {
+                "语言": "pt-BR",
+                "人群": "Brazilian first-time crypto users aged 25-40",
+                "场景": "uso no celular",
+                "目标": "cadastro",
+            },
+        }
+        result = self.provider.generate_content(product, demand, [], [], {"status": "PASS"})
+        concept = result["video_ad_concepts"][0]
+        official_text = " ".join(
+            [
+                result["campaign_summary"]["核心卖点"],
+                concept["hook"],
+                concept["15s_script"],
+                concept["voiceover"],
+                " ".join(concept["captions"]),
+                concept["facebook_primary_text"],
+            ]
+        )
+
+        self.assertEqual(result["campaign_summary"]["目标人群"], "Brazilian first-time crypto users aged 25-40")
+        self.assertIn("Brazilian first-time crypto users aged 25-40", concept["target_angle"])
+        self.assertNotIn("fast deposits, clean interface, new user campaign", official_text)
+        self.assertIn("depósitos rápidos", official_text)
+
+    def test_campaign_rules_stay_out_of_official_ad_content(self):
+        product = dict(
+            self.product,
+            name="CopyTrade Pro",
+            campaign_rules="new users must complete KYC and trade 100 USDT before campaign eligibility",
+        )
+        demand = {"raw_input": "Facebook US 15s", "structured": {"语言": "en", "人群": "risk-aware beginners", "场景": "mobile browsing", "目标": "signup"}}
+        result = self.provider.generate_content(product, demand, [], [], {"status": "PASS"})
+        rule_text = product["campaign_rules"]
+
+        for concept in result["video_ad_concepts"]:
+            official_text = " ".join(
+                [
+                    concept["15s_script"],
+                    concept["voiceover"],
+                    " ".join(concept["captions"]),
+                    concept["facebook_primary_text"],
+                ]
+            )
+            self.assertNotIn(rule_text, official_text)
+            self.assertIn(rule_text, concept["compliance_notes"])
+
+    def test_mock_prompts_carry_requested_voice_and_text_language(self):
+        product = dict(self.product, name="CopyTrade Pro", selling_points="fast deposits, clean interface, new user campaign")
+        expected = {
+            "pt-BR": "voiceover, captions, on-screen text should be Brazilian Portuguese",
+            "es": "voiceover, captions, on-screen text should be Spanish",
+            "en": "voiceover, captions, on-screen text should be English",
+        }
+        for language, runway_instruction in expected.items():
+            with self.subTest(language=language):
+                demand = {"raw_input": "Facebook 15s", "structured": {"语言": language, "场景": "mobile browsing", "目标": "signup"}}
+                result = self.provider.generate_content(product, demand, [], [], {"status": "PASS"})
+                concept = result["video_ad_concepts"][0]
+
+                self.assertIn(runway_instruction, concept["runway_prompt"])
+                self.assertIn(self.provider._language_label(language), concept["elevenlabs_prompt"])
+
     def test_generate_content_uses_spanish_when_requested(self):
         product = dict(self.product, name="CopyTrade Pro", selling_points="bono de registro, copy trading, inicio rápido")
         demand = {"raw_input": "Facebook México 15s", "structured": {"语言": "es", "场景": "uso móvil", "目标": "registro"}}
@@ -104,21 +212,10 @@ class MockAIProviderTests(unittest.TestCase):
         self.assertGreaterEqual(result["总分"], 80)
         self.assertEqual(
             set(result["维度得分"].keys()),
-            {
-                "产品事实准确性",
-                "真实性与红线素材",
-                "场景与人群匹配",
-                "脚本与分镜质量",
-                "视频brief可执行性",
-                "合规与风险",
-                "复用价值",
-            },
+            {"产品事实准确性", "真实性与红线素材", "场景与人群匹配", "脚本与分镜质量", "视频brief可执行性", "合规与风险", "复用价值"},
         )
 
     def test_analyze_performance_recommends_next_step(self):
-        result = self.provider.analyze_performance(
-            {"素材方向": "注册转化"},
-            {"ctr": 0.8, "cpa": 20, "play_50": 200, "play_3s": 1000},
-        )
+        result = self.provider.analyze_performance({"素材方向": "注册转化"}, {"ctr": 0.8, "cpa": 20, "play_50": 200, "play_3s": 1000})
         self.assertIn("表现判断", result)
         self.assertIn("下一轮动作", result)
