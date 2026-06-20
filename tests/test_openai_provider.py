@@ -9,6 +9,8 @@ class FakeResponses:
         self.client = client
 
     def create(self, **kwargs):
+        if "response_format" in kwargs:
+            raise TypeError("create() got an unexpected keyword argument 'response_format'")
         self.client.calls.append(kwargs)
         return self.client.response
 
@@ -48,6 +50,17 @@ class OpenAIProviderTests(unittest.TestCase):
         result = provider.generate_content({"name": "CopyTrade Pro"}, {"structured": {"语言": "en"}}, [], [], {"status": "PASS"})
         self.assertEqual(result["素材方向"], "Direction")
         self.assertIn("15秒脚本", result["脚本"])
+
+    def test_responses_create_uses_text_format_instead_of_response_format(self):
+        client = FakeClient({"平台": "Facebook", "国家": "巴西", "人群": "新用户", "场景": "移动端", "目标": "注册转化", "时长": "15秒", "输出物": ["脚本"], "缺失信息": []})
+        provider = OpenAIProvider(api_key="test-key", model="gpt-test", client=client)
+
+        provider.structure_demand("给Facebook巴西用户做广告", {"platform": "Facebook"})
+
+        call = client.calls[-1]
+        self.assertNotIn("response_format", call)
+        self.assertIn("text", call)
+        self.assertIn("format", call["text"])
 
     def test_blocked_audit_still_prevents_generation_without_openai_call(self):
         client = FakeClient(self._generation_payload())
