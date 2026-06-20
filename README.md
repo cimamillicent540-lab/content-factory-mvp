@@ -61,6 +61,19 @@ JSON 字段名、评分报告、投放分析建议、红线阻断原因可以继
 
 红线阻断时返回 `BLOCKED`，不会返回正式 `素材内容`。
 
+## Mock 输出结构
+
+Mock 模式用于本地开发和测试，不调用真实 OpenAI API。正常生成时，`素材内容` 会返回稳定结构：
+
+- `campaign_summary`：产品、国家、平台、目标人群、投放语言、核心卖点和风险提醒。
+- `video_ad_concepts`：5 套短视频广告方案，每套包含 hook、15 秒脚本、旁白、字幕、Runway prompt、ElevenLabs prompt、Facebook primary text / headline / description 和合规说明。
+- `scoring_report`：hook、清晰度、信任感、合规、本地化和转化潜力评分，以及总分和优化建议。
+- `media_production_notes`：Runway、ElevenLabs、字幕节奏、首 3 秒和 A/B 测试建议。
+- `launch_plan`：优先测试方案、受众角度和初始观察指标。
+- `forbidden_claims_check`：禁用表达命中情况、风险说明和替代表达建议。
+
+命中收益保证、无风险或快速致富类红线表达时，接口返回 `BLOCKED`，不生成 `video_ad_concepts`，并保存中文阻断原因和替代表达建议。
+
 ## CLI 运行
 
 ```bash

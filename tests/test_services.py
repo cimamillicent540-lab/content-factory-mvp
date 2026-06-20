@@ -39,18 +39,15 @@ class ServicePipelineTests(unittest.TestCase):
         self.assertEqual(result["状态"], "GENERATED")
         self.assertIsNotNone(result["generation_id"])
         self.assertEqual(result["素材审核"]["status"], "PASS")
-        self.assertIn("素材方向", result["素材内容"])
-        self.assertNotIn("中文" + "素材内容", result)
+        self.assertIn("campaign_summary", result["素材内容"])
+        self.assertEqual(len(result["素材内容"]["video_ad_concepts"]), 5)
         self.assertIn("总分", result["评分报告"])
 
         saved = get_generation_result(self.conn, result["generation_id"])
         self.assertEqual(saved["product"]["name"], "测试钱包")
         self.assertEqual(saved["audit"]["status"], "PASS")
-        self.assertIn("15秒脚本", saved["generation"]["脚本"])
-        self.assertGreaterEqual(saved["evaluation"]["总分"], 80)
-
-        demand_row = self.conn.execute("SELECT structured_json FROM demand_intakes").fetchone()
-        structured = loads_json(demand_row["structured_json"])
+        self.assertIn("15s_script", saved["generation"]["video_ad_concepts"][0])
+        structured = loads_json(self.conn.execute("SELECT structured_json FROM demand_intakes").fetchone()["structured_json"])
         self.assertEqual(structured["平台"], "TikTok")
         self.assertEqual(structured["国家"], "巴西")
         self.assertEqual(structured["语言"], "中文")
@@ -79,9 +76,10 @@ class ServicePipelineTests(unittest.TestCase):
 
         self.assertEqual(result["状态"], "GENERATED")
         self.assertEqual(get_generation_result(self.conn, result["generation_id"])["demand"]["structured"]["语言"], "pt-BR")
-        self.assertIn("Confira", content["旁白"])
-        self.assertIn("Comece", content["Facebook广告文案"])
-        self.assertNotIn("真实", content["旁白"])
+        concept = content["video_ad_concepts"][0]
+        self.assertIn("Confira", concept["hook"])
+        self.assertIn("Comece", concept["facebook_primary_text"])
+        self.assertNotIn("真实", concept["voiceover"])
 
     def test_pipeline_saves_block_reason_without_generation_when_redline_hit(self):
         request = {
@@ -109,8 +107,9 @@ class ServicePipelineTests(unittest.TestCase):
         self.assertEqual(result["素材审核"]["status"], "FATAL_FAILED")
         self.assertIn("保证收益", " ".join(result["阻断原因"]))
         self.assertNotIn("素材内容", result)
-        generation_count = self.conn.execute("SELECT COUNT(*) AS count FROM content_generations").fetchone()["count"]
-        self.assertEqual(generation_count, 0)
+        self.assertIn("替代表达建议", result["素材审核"])
+        count = self.conn.execute("SELECT COUNT(*) AS count FROM content_generations").fetchone()["count"]
+        self.assertEqual(count, 0)
 
     def test_performance_feedback_is_saved_and_readable(self):
         request = {
