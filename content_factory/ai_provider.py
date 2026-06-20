@@ -52,8 +52,19 @@ class MockAIProvider:
 
     def audit_materials(self, product, demand, materials):
         raw_input = demand.get("raw_input", "")
-        forbidden_claims = self._split_claims(product.get("forbidden_claims", ""))
-        risks = [claim for claim in forbidden_claims if claim and claim in raw_input]
+        forbidden_claims = self._forbidden_claims(product.get("forbidden_claims", ""))
+        risk_text = " ".join(
+            str(value or "")
+            for value in (
+                raw_input,
+                product.get("name", ""),
+                product.get("selling_points", ""),
+                product.get("campaign_rules", ""),
+                product.get("notes", ""),
+                product.get("compliance_redlines", ""),
+            )
+        ).lower()
+        risks = [claim for claim in forbidden_claims if claim and claim.lower() in risk_text]
         if risks:
             return {
                 "status": "FATAL_FAILED",
@@ -61,6 +72,8 @@ class MockAIProvider:
                 "checks": self._audit_checks(False, False, False),
                 "missing_materials": [],
                 "risks": risks,
+                "risk_explanation": "命中收益保证、无风险或快速致富类表达，可能造成合规风险。",
+                "替代表达建议": self._alternative_claims(risks),
                 "next_actions": ["删除禁用表达", "重新提交符合合规边界的需求"],
             }
 
@@ -113,124 +126,58 @@ class MockAIProvider:
         benchmark_hint = self._localized_benchmark_hint(language)
         if benchmarks:
             benchmark_hint = benchmarks[0].get("可复用结构") or benchmark_hint
-
-        if language == "pt-BR":
-            return {
-                "素材方向": f"Mostre o valor real de {product_name} em {scene}, com foco em {goal}.",
-                "脚本": {
-                    "10秒脚本": f"Abra com uma necessidade em {scene}, mostre a interface real de {product_name}, destaque {selling_points} e finalize com as regras da oferta.",
-                    "15秒脚本": f"Nos 3 primeiros segundos, apresente a dúvida do usuário. Depois, mostre logo e interface reais de {product_name}, explique {selling_points} e cite a regra: {campaign_rules}.",
-                    "30秒脚本": f"Conte a jornada em cinco partes: contexto, uso do produto, benefício, regra da campanha e CTA. Use apenas fatos confirmados sobre {product_name}.",
-                },
-                "旁白": f"Confira {product_name} com atenção às regras reais, à interface do produto e ao que faz sentido para o seu uso.",
-                "字幕": [
-                    f"{scene}: confira as regras reais",
-                    f"{product_name}: {selling_points}",
-                    "A campanha segue as regras da página",
-                    "Comece conferindo os detalhes",
-                ],
-                "分镜": [
-                    {"镜头": 1, "画面": scene, "目的": "Apresentar contexto e necessidade"},
-                    {"镜头": 2, "画面": "Logo e interface reais", "目的": "Construir confiança"},
-                    {"镜头": 3, "画面": selling_points, "目的": "Explicar o valor principal"},
-                    {"镜头": 4, "画面": campaign_rules, "目的": "Mostrar limites da oferta"},
-                    {"镜头": 5, "画面": "CTA ou página de destino", "目的": "Conduzir a ação"},
-                ],
-                "Runway Prompt": f"Brazilian Portuguese ad video, real mobile usage scene, show {product_name} interface, clear pacing, no exaggerated claims.",
-                "HeyGen Prompt": f"Brazilian Portuguese spokesperson video, calm and credible tone, explain {product_name}: {selling_points}, remind users to check page rules.",
-                "ElevenLabs Prompt": "Brazilian Portuguese voiceover, natural rhythm, credible, clear, not exaggerated, suitable for performance ads.",
-                "Facebook广告文案": f"Confira {product_name}: {selling_points}. Veja a interface real e as regras antes de participar. Comece pelos detalhes.",
-                "TikTok广告文案": f"Veja como {product_name} funciona em {scene}. Regras claras, interface real e próximo passo simples. {benchmark_hint}",
-                "合规提醒": "Use only confirmed product facts and real campaign rules.",
-            }
-
-        if language == "es":
-            return {
-                "素材方向": f"Muestra el valor real de {product_name} en {scene}, con foco en {goal}.",
-                "脚本": {
-                    "10秒脚本": f"Abre con una necesidad en {scene}, muestra la interfaz real de {product_name}, destaca {selling_points} y cierra con las reglas.",
-                    "15秒脚本": f"En los primeros 3 segundos, presenta la duda del usuario. Luego muestra logo e interfaz reales de {product_name}, explica {selling_points} y cita la regla: {campaign_rules}.",
-                    "30秒脚本": f"Cuenta la historia en cinco partes: contexto, uso del producto, beneficio, regla de campaña y CTA. Usa solo hechos confirmados de {product_name}.",
-                },
-                "旁白": f"Consulta {product_name} revisando las reglas reales, la interfaz del producto y si encaja con tu forma de uso.",
-                "字幕": [
-                    f"{scene}: consulta las reglas reales",
-                    f"{product_name}: {selling_points}",
-                    "La campaña sigue las reglas de la página",
-                    "Comienza revisando los detalles",
-                ],
-                "分镜": [
-                    {"镜头": 1, "画面": scene, "目的": "Presentar contexto y necesidad"},
-                    {"镜头": 2, "画面": "Logo e interfaz reales", "目的": "Construir confianza"},
-                    {"镜头": 3, "画面": selling_points, "目的": "Explicar el valor principal"},
-                    {"镜头": 4, "画面": campaign_rules, "目的": "Mostrar límites de la oferta"},
-                    {"镜头": 5, "画面": "CTA o landing page", "目的": "Guiar la acción"},
-                ],
-                "Runway Prompt": f"Spanish ad video, real mobile usage scene, show {product_name} interface, clear pacing, no exaggerated claims.",
-                "HeyGen Prompt": f"Spanish spokesperson video, credible calm tone, explain {product_name}: {selling_points}, remind users to check page rules.",
-                "ElevenLabs Prompt": "Spanish voiceover, natural rhythm, credible, clear, not exaggerated, suitable for performance ads.",
-                "Facebook广告文案": f"Consulta {product_name}: {selling_points}. Revisa la interfaz real y las reglas antes de participar. Comienza por los detalles.",
-                "TikTok广告文案": f"Así puedes revisar {product_name} en {scene}: reglas claras, interfaz real y próximo paso simple. Comienza por los detalles. {benchmark_hint}",
-                "合规提醒": "Usa solo hechos confirmados del producto y reglas reales de campaña.",
-            }
-
-        if language == "en":
-            return {
-                "素材方向": f"Show the real value of {product_name} in {scene}, focused on {goal}.",
-                "脚本": {
-                    "10秒脚本": f"Open with a need in {scene}, show the real {product_name} interface, highlight {selling_points}, and close with the offer rules.",
-                    "15秒脚本": f"In the first 3 seconds, introduce the user's question. Then show the real logo and interface for {product_name}, explain {selling_points}, and state the rule: {campaign_rules}.",
-                    "30秒脚本": f"Build five beats: context, product use, benefit, campaign rule, and CTA. Use only confirmed facts about {product_name}.",
-                },
-                "旁白": f"Check {product_name} by reviewing the real rules, the product interface, and whether it fits your use case.",
-                "字幕": [
-                    f"{scene}: check the real rules",
-                    f"{product_name}: {selling_points}",
-                    "Campaign terms follow the landing page",
-                    "Get started by checking the details",
-                ],
-                "分镜": [
-                    {"镜头": 1, "画面": scene, "目的": "Set context and user need"},
-                    {"镜头": 2, "画面": "Real logo and interface", "目的": "Build trust"},
-                    {"镜头": 3, "画面": selling_points, "目的": "Explain the core value"},
-                    {"镜头": 4, "画面": campaign_rules, "目的": "Show campaign boundaries"},
-                    {"镜头": 5, "画面": "CTA or landing page", "目的": "Guide action"},
-                ],
-                "Runway Prompt": f"English ad video, real mobile usage scene, show {product_name} interface, clear pacing, no exaggerated claims.",
-                "HeyGen Prompt": f"English spokesperson video, calm credible tone, explain {product_name}: {selling_points}, remind users to check page rules.",
-                "ElevenLabs Prompt": "English voiceover, natural rhythm, credible, clear, not exaggerated, suitable for performance ads. Get started with a confident but restrained tone.",
-                "Facebook广告文案": f"Check {product_name}: {selling_points}. Review the real interface and rules before joining. Get started with the details.",
-                "TikTok广告文案": f"See how {product_name} works in {scene}: clear rules, real interface, simple next step. {benchmark_hint}",
-                "合规提醒": "Use only confirmed product facts and real campaign rules.",
-            }
-
+        forbidden_check = self._forbidden_claims_check(product, demand)
         return {
-            "素材方向": f"围绕{scene}展示{product_name}的真实使用价值，目标是{goal}。",
-            "脚本": {
-                "10秒脚本": f"开场点出{scene}的需求，展示{product_name}真实界面，强调{selling_points}，结尾提示查看活动规则。",
-                "15秒脚本": f"前3秒提出用户困扰，中段用真实logo和界面展示{product_name}，说明{selling_points}，最后引用活动规则：{campaign_rules}。",
-                "30秒脚本": f"用生活场景切入，拆成痛点、产品操作、卖点解释、活动规则、CTA五段；全程只表达{product_name}已确认事实，不做夸大承诺。",
+            "campaign_summary": {
+                "产品": product_name,
+                "国家": structured.get("国家") or product.get("country", ""),
+                "平台": structured.get("平台") or product.get("platform", ""),
+                "目标人群": structured.get("人群", "目标用户"),
+                "投放语言": language,
+                "核心卖点": selling_points,
+                "风险提醒": "仅使用已确认产品事实和真实活动规则，不承诺收益、不暗示无风险。",
             },
-            "旁白": f"如果你也在{scene}需要更清晰的选择，可以看看{product_name}。重点看真实界面、真实规则和适合自己的操作路径。",
-            "字幕": [
-                f"{scene}，先看真实规则",
-                f"{product_name}：{selling_points}",
-                "活动以页面展示为准",
-                "现在查看详情",
-            ],
-            "分镜": [
-                {"镜头": 1, "画面": scene, "目的": "建立人群和问题"},
-                {"镜头": 2, "画面": "展示真实logo和产品界面", "目的": "建立真实性"},
-                {"镜头": 3, "画面": selling_points, "目的": "解释核心卖点"},
-                {"镜头": 4, "画面": campaign_rules, "目的": "交代活动边界"},
-                {"镜头": 5, "画面": "CTA按钮或落地页入口", "目的": "引导行动"},
-            ],
-            "Runway Prompt": f"中文广告短视频，真实手机使用场景，展示{product_name}界面，不虚构收益，节奏清晰，画面干净。",
-            "HeyGen Prompt": f"中文口播，语气可信克制，说明{product_name}的真实卖点：{selling_points}，提醒活动以页面规则为准。",
-            "ElevenLabs Prompt": "中文普通话旁白，节奏自然，可信、清晰、不夸张，适合投流素材。",
-            "Facebook广告文案": f"{product_name}适合关注{goal}的用户。先看真实界面和活动规则，再决定是否参与。",
-            "TikTok广告文案": f"{scene}可以这样看{product_name}：真实界面、真实规则、重点清楚。{benchmark_hint}",
-            "合规提醒": audit.get("summary", "生成前需完成素材评估。"),
+            "video_ad_concepts": self._video_ad_concepts(
+                language,
+                product_name,
+                scene,
+                goal,
+                selling_points,
+                campaign_rules,
+                benchmark_hint,
+            ),
+            "scoring_report": {
+                "hook_score": 15,
+                "clarity_score": 15,
+                "trust_score": 15,
+                "compliance_score": 18,
+                "localization_score": 14,
+                "conversion_potential_score": 13,
+                "total_score": 90,
+                "improvement_suggestions": [
+                    "前3秒保留真实界面或明确使用场景，避免抽象卖点堆叠。",
+                    "每套素材只强调一个核心转化动作，降低信息密度。",
+                    "投放后按 CTR、CPA、3秒播放率和50%播放率筛选下一轮脚本。",
+                ],
+            },
+            "media_production_notes": {
+                "Runway 生成建议": "使用真实产品界面截图做参考，镜头保持移动端竖屏、干净背景、轻快节奏。",
+                "ElevenLabs 配音建议": "语速中等，可信克制，不使用夸张促销语气。",
+                "字幕节奏建议": "每条字幕控制在两行内，首3秒出现核心场景和动作词。",
+                "首 3 秒优化建议": "先给出用户问题或真实界面动作，再出现产品名。",
+                "素材 A/B 测试建议": "测试痛点开场、界面开场、规则透明开场三类 hook。",
+            },
+            "launch_plan": {
+                "推荐优先测试": ["C01", "C02", "C04"],
+                "为什么先测": "这三套分别覆盖痛点、真实界面和活动规则透明度，能快速判断用户信任与转化阻力。",
+                "每套适合的受众角度": {
+                    "C01": "首次接触产品、需要快速理解价值的新用户",
+                    "C02": "重视真实界面和操作路径的谨慎用户",
+                    "C04": "对活动规则敏感、需要先确认边界的用户",
+                },
+                "初始投放观察指标": ["CTR", "CPA", "3秒播放率", "50%播放率", "注册转化率"],
+            },
+            "forbidden_claims_check": forbidden_check,
         }
 
     def evaluate_generation(self, product, demand, generation, audit):
@@ -363,6 +310,459 @@ class MockAIProvider:
             "en": "Structure: pain point first, facts next, action at the end.",
             "zh": "参考爆款结构：先痛点、再事实、后行动。",
         }[language]
+
+    def _forbidden_claims(self, configured_claims=""):
+        defaults = [
+            "guaranteed profit",
+            "risk-free",
+            "no loss",
+            "保证收益",
+            "稳赚",
+            "不亏钱",
+            "100% win",
+            "get rich quick",
+        ]
+        configured = self._split_claims(configured_claims or "")
+        merged = []
+        for claim in configured + defaults:
+            if claim and claim not in merged:
+                merged.append(claim)
+        return merged
+
+    def _alternative_claims(self, risks):
+        suggestions = []
+        for risk in risks:
+            suggestions.append(f"将“{risk}”改为“请查看真实规则、产品功能和适合自己的使用场景”。")
+        if not suggestions:
+            suggestions.append("使用真实产品功能、活动规则和风险提示替代收益承诺。")
+        return suggestions
+
+    def _forbidden_claims_check(self, product, demand):
+        text = " ".join(
+            str(value or "")
+            for value in (
+                demand.get("raw_input", ""),
+                product.get("name", ""),
+                product.get("selling_points", ""),
+                product.get("campaign_rules", ""),
+                product.get("notes", ""),
+            )
+        ).lower()
+        hits = [claim for claim in self._forbidden_claims(product.get("forbidden_claims", "")) if claim.lower() in text]
+        return {
+            "是否命中禁用词": bool(hits),
+            "命中的词": hits,
+            "风险说明": "命中收益保证、无风险或快速致富类表达。" if hits else "未命中预设高风险收益承诺表达。",
+            "替代表达建议": self._alternative_claims(hits),
+        }
+
+    def _video_ad_concepts(self, language, product_name, scene, goal, selling_points, campaign_rules, benchmark_hint):
+        angles = self._localized_concept_angles(language)
+        concepts = []
+        for index, angle in enumerate(angles, start=1):
+            concept_id = f"C{index:02d}"
+            concepts.append(
+                {
+                    "concept_id": concept_id,
+                    "concept_name": angle["name"],
+                    "target_angle": angle["target_angle"],
+                    "hook": angle["hook"].format(product=product_name, scene=scene, points=selling_points),
+                    "scene_breakdown": angle["scene_breakdown"].format(product=product_name, scene=scene, points=selling_points, rules=campaign_rules),
+                    "15s_script": angle["script"].format(product=product_name, scene=scene, points=selling_points, rules=campaign_rules),
+                    "voiceover": angle["voiceover"].format(product=product_name, scene=scene, points=selling_points, rules=campaign_rules),
+                    "captions": [caption.format(product=product_name, scene=scene, points=selling_points, rules=campaign_rules) for caption in angle["captions"]],
+                    "visual_style": angle["visual_style"],
+                    "runway_prompt": angle["runway_prompt"].format(product=product_name, scene=scene, points=selling_points, hint=benchmark_hint),
+                    "elevenlabs_prompt": angle["elevenlabs_prompt"],
+                    "facebook_primary_text": angle["facebook_primary_text"].format(product=product_name, scene=scene, points=selling_points, rules=campaign_rules),
+                    "facebook_headline": angle["facebook_headline"].format(product=product_name),
+                    "facebook_description": angle["facebook_description"].format(product=product_name, points=selling_points),
+                    "compliance_notes": "只表达真实产品事实和页面活动规则；不承诺收益、不暗示无风险。",
+                }
+            )
+        return concepts
+
+    def _localized_concept_angles(self, language):
+        if language == "pt-BR":
+            return [
+                {
+                    "name": "Comece conferindo as regras",
+                    "target_angle": "Novo usuário que precisa entender a oferta antes de agir",
+                    "hook": "Confira {product} antes de participar.",
+                    "scene_breakdown": "Celular em {scene}; interface real; destaque de {points}; tela final com regras.",
+                    "script": "Abra com uma dúvida comum em {scene}. Mostre a interface real de {product}, explique {points} e finalize lembrando: {rules}.",
+                    "voiceover": "Confira {product} com calma, veja a interface real e leia as regras antes de começar.",
+                    "captions": ["Confira as regras reais", "{product}: {points}", "Comece pelos detalhes"],
+                    "visual_style": "Vertical, mobile-first, clean UI close-ups",
+                    "runway_prompt": "Brazilian Portuguese performance ad, real mobile UI, {scene}, show {product}, clear product flow, no exaggerated claims. {hint}",
+                    "elevenlabs_prompt": "Brazilian Portuguese voiceover, calm, credible, natural rhythm.",
+                    "facebook_primary_text": "Confira {product}: {points}. Veja as regras reais antes de participar. Comece pelos detalhes.",
+                    "facebook_headline": "Confira {product}",
+                    "facebook_description": "Veja regras e interface real antes de começar.",
+                },
+                {
+                    "name": "Interface real em 15 segundos",
+                    "target_angle": "Usuário cauteloso que quer ver como funciona",
+                    "hook": "Veja como {product} funciona no celular.",
+                    "scene_breakdown": "Abertura com mão usando celular; zoom em interface; benefícios; CTA.",
+                    "script": "Mostre a tela real, explique {points} em uma frase e conduza para conferir as regras completas.",
+                    "voiceover": "Veja a interface, entenda os pontos principais e decida com base nas regras reais.",
+                    "captions": ["Interface real", "{points}", "Confira antes de participar"],
+                    "visual_style": "Screen-recording style with human hand context",
+                    "runway_prompt": "Brazilian Portuguese mobile ad, hand holding phone, real interface beats, {product}, trustworthy pacing.",
+                    "elevenlabs_prompt": "Brazilian Portuguese voice, concise and trustworthy.",
+                    "facebook_primary_text": "Veja {product} em uso real no celular. {points}. Consulte as regras completas.",
+                    "facebook_headline": "Veja como funciona",
+                    "facebook_description": "Interface real e regras claras.",
+                },
+                {
+                    "name": "Primeiro passo simples",
+                    "target_angle": "Usuário pronto para testar uma jornada curta",
+                    "hook": "O primeiro passo em {product} pode ser simples.",
+                    "scene_breakdown": "Problema rápido; tela do produto; regra da campanha; CTA.",
+                    "script": "Mostre a situação, apresente {product}, destaque {points} e finalize com um CTA para conferir detalhes.",
+                    "voiceover": "Comece conferindo os detalhes, a interface e as regras reais de {product}.",
+                    "captions": ["Primeiro passo simples", "Leia as regras", "Confira os detalhes"],
+                    "visual_style": "Fast cuts, clear captions, no hype",
+                    "runway_prompt": "Brazilian Portuguese short ad, fast but clear cuts, real app UI, simple CTA, compliance-safe.",
+                    "elevenlabs_prompt": "Brazilian Portuguese upbeat but restrained performance ad voice.",
+                    "facebook_primary_text": "Comece por uma visão clara: {product}, {points} e regras reais da campanha.",
+                    "facebook_headline": "Comece pelos detalhes",
+                    "facebook_description": "Veja o fluxo antes de agir.",
+                },
+                {
+                    "name": "Regras transparentes",
+                    "target_angle": "Usuário sensível a condições de campanha",
+                    "hook": "Antes de participar, veja as regras.",
+                    "scene_breakdown": "Tela de regras; interface; benefício; CTA para página.",
+                    "script": "Apresente {rules}, conecte com {points} e mantenha a decisão nas mãos do usuário.",
+                    "voiceover": "As regras vêm primeiro. Confira os detalhes e veja se {product} faz sentido para você.",
+                    "captions": ["Regras primeiro", "{rules}", "Decida com clareza"],
+                    "visual_style": "Transparent rule cards over real UI",
+                    "runway_prompt": "Brazilian Portuguese transparent offer ad, rule cards, real UI, clear captions, trustworthy tone.",
+                    "elevenlabs_prompt": "Brazilian Portuguese calm explanatory voice.",
+                    "facebook_primary_text": "Regras claras antes de qualquer ação. Confira {product} e veja se combina com seu uso.",
+                    "facebook_headline": "Regras claras",
+                    "facebook_description": "Confira antes de participar.",
+                },
+                {
+                    "name": "Comparação de rotina",
+                    "target_angle": "Usuário que decide no contexto do dia a dia",
+                    "hook": "Em {scene}, uma interface clara ajuda.",
+                    "scene_breakdown": "Rotina diária; celular; produto; resumo dos pontos; CTA.",
+                    "script": "Use {scene} como contexto, mostre {product} e resuma {points} sem prometer resultado.",
+                    "voiceover": "Na rotina, clareza importa. Veja {product}, confira {points} e leia as regras.",
+                    "captions": ["Clareza na rotina", "{points}", "Sem promessas exageradas"],
+                    "visual_style": "Lifestyle plus product UI",
+                    "runway_prompt": "Brazilian Portuguese lifestyle mobile ad, daily routine, real app interface, credible tone.",
+                    "elevenlabs_prompt": "Brazilian Portuguese lifestyle ad voice, natural and clear.",
+                    "facebook_primary_text": "Em {scene}, confira {product}: {points}. Leia as regras e decida com clareza.",
+                    "facebook_headline": "Clareza para começar",
+                    "facebook_description": "Veja a interface e as regras.",
+                },
+            ]
+        if language == "es":
+            return [
+                {
+                    "name": "Consulta las reglas primero",
+                    "target_angle": "Usuario nuevo que necesita entender la oferta",
+                    "hook": "Consulta {product} antes de participar.",
+                    "scene_breakdown": "Uso móvil en {scene}; interfaz real; {points}; cierre con reglas.",
+                    "script": "Abre con una duda del usuario, muestra {product}, explica {points} y recuerda revisar: {rules}.",
+                    "voiceover": "Consulta {product}, revisa la interfaz real y lee las reglas antes de comenzar.",
+                    "captions": ["Consulta las reglas reales", "{product}: {points}", "Comienza por los detalles"],
+                    "visual_style": "Vertical, interfaz clara, ritmo directo",
+                    "runway_prompt": "Spanish performance ad, real mobile UI, {product}, clear offer rules, no exaggerated claims.",
+                    "elevenlabs_prompt": "Spanish voiceover, natural, calm, credible.",
+                    "facebook_primary_text": "Consulta {product}: {points}. Revisa las reglas reales antes de participar. Comienza por los detalles.",
+                    "facebook_headline": "Consulta {product}",
+                    "facebook_description": "Interfaz real y reglas claras.",
+                },
+                {
+                    "name": "Interfaz real",
+                    "target_angle": "Usuario cauteloso que quiere ver el flujo",
+                    "hook": "Mira cómo funciona {product} en el móvil.",
+                    "scene_breakdown": "Mano con móvil; interfaz; beneficio; CTA.",
+                    "script": "Muestra la pantalla real, resume {points} y guía al usuario a revisar las reglas completas.",
+                    "voiceover": "Mira la interfaz, entiende los puntos principales y decide con reglas reales.",
+                    "captions": ["Interfaz real", "{points}", "Consulta antes de participar"],
+                    "visual_style": "Screen recording con contexto humano",
+                    "runway_prompt": "Spanish mobile ad, real phone interface, trustworthy pacing, {product}.",
+                    "elevenlabs_prompt": "Spanish concise credible voice.",
+                    "facebook_primary_text": "Mira {product} en uso real. {points}. Consulta las reglas completas.",
+                    "facebook_headline": "Mira cómo funciona",
+                    "facebook_description": "Reglas claras antes de empezar.",
+                },
+                {
+                    "name": "Primer paso simple",
+                    "target_angle": "Usuario que necesita una acción clara",
+                    "hook": "El primer paso en {product} puede ser simple.",
+                    "scene_breakdown": "Problema rápido; producto; regla; CTA.",
+                    "script": "Presenta la situación, muestra {product}, destaca {points} y cierra con revisar detalles.",
+                    "voiceover": "Comienza revisando los detalles, la interfaz y las reglas reales de {product}.",
+                    "captions": ["Primer paso simple", "Lee las reglas", "Revisa los detalles"],
+                    "visual_style": "Cortes rápidos con subtítulos claros",
+                    "runway_prompt": "Spanish short ad, fast clean cuts, real app UI, simple CTA, compliance-safe.",
+                    "elevenlabs_prompt": "Spanish upbeat but restrained ad voice.",
+                    "facebook_primary_text": "Comienza con una visión clara: {product}, {points} y reglas reales.",
+                    "facebook_headline": "Comienza por detalles",
+                    "facebook_description": "Revisa el flujo antes de actuar.",
+                },
+                {
+                    "name": "Reglas transparentes",
+                    "target_angle": "Usuario sensible a condiciones",
+                    "hook": "Antes de participar, revisa las reglas.",
+                    "scene_breakdown": "Tarjetas de reglas; interfaz; beneficio; CTA.",
+                    "script": "Presenta {rules}, conecta con {points} y deja clara la decisión del usuario.",
+                    "voiceover": "Las reglas van primero. Consulta los detalles y decide si {product} encaja contigo.",
+                    "captions": ["Reglas primero", "{rules}", "Decide con claridad"],
+                    "visual_style": "Rule cards sobre UI real",
+                    "runway_prompt": "Spanish transparent offer ad, rule cards, real UI, clear captions.",
+                    "elevenlabs_prompt": "Spanish calm explanatory voice.",
+                    "facebook_primary_text": "Reglas claras antes de actuar. Consulta {product} y decide con información.",
+                    "facebook_headline": "Reglas claras",
+                    "facebook_description": "Consulta antes de participar.",
+                },
+                {
+                    "name": "Rutina diaria",
+                    "target_angle": "Usuario que decide por contexto cotidiano",
+                    "hook": "En {scene}, una interfaz clara ayuda.",
+                    "scene_breakdown": "Rutina; móvil; producto; puntos clave; CTA.",
+                    "script": "Usa {scene} como contexto, muestra {product} y resume {points} sin prometer resultados.",
+                    "voiceover": "En la rutina, la claridad importa. Mira {product}, revisa {points} y lee las reglas.",
+                    "captions": ["Claridad en tu rutina", "{points}", "Sin promesas exageradas"],
+                    "visual_style": "Lifestyle con UI del producto",
+                    "runway_prompt": "Spanish lifestyle mobile ad, daily routine, real app interface, credible tone.",
+                    "elevenlabs_prompt": "Spanish natural lifestyle ad voice.",
+                    "facebook_primary_text": "En {scene}, consulta {product}: {points}. Lee las reglas y decide con claridad.",
+                    "facebook_headline": "Claridad para empezar",
+                    "facebook_description": "Interfaz y reglas reales.",
+                },
+            ]
+        if language == "en":
+            return [
+                {
+                    "name": "Check the rules first",
+                    "target_angle": "New user who needs clarity before taking action",
+                    "hook": "Check {product} before you join.",
+                    "scene_breakdown": "Mobile use in {scene}; real interface; {points}; rules screen.",
+                    "script": "Open with a user question, show {product}, explain {points}, then point to the real terms: {rules}.",
+                    "voiceover": "Check {product}, review the real interface, and read the rules before you get started.",
+                    "captions": ["Check the real rules", "{product}: {points}", "Get started with the details"],
+                    "visual_style": "Vertical mobile-first ad with clean UI close-ups",
+                    "runway_prompt": "English performance ad, real mobile UI, {product}, clear offer rules, no exaggerated claims.",
+                    "elevenlabs_prompt": "English voiceover, calm, credible, natural rhythm.",
+                    "facebook_primary_text": "Check {product}: {points}. Review the real rules before joining. Get started with the details.",
+                    "facebook_headline": "Check {product}",
+                    "facebook_description": "Real interface and clear rules.",
+                },
+                {
+                    "name": "Real interface walkthrough",
+                    "target_angle": "Cautious user who wants to see the flow",
+                    "hook": "See how {product} works on mobile.",
+                    "scene_breakdown": "Hand with phone; UI close-up; benefit; CTA.",
+                    "script": "Show the real screen, summarize {points}, and guide users to review complete terms.",
+                    "voiceover": "See the interface, understand the main points, and decide with the real rules in mind.",
+                    "captions": ["Real interface", "{points}", "Check before joining"],
+                    "visual_style": "Screen-recording style with human context",
+                    "runway_prompt": "English mobile ad, hand holding phone, real interface beats, trustworthy pacing, {product}.",
+                    "elevenlabs_prompt": "English concise credible performance voice.",
+                    "facebook_primary_text": "See {product} in real mobile use. {points}. Check the complete rules first.",
+                    "facebook_headline": "See how it works",
+                    "facebook_description": "Clear rules before you start.",
+                },
+                {
+                    "name": "Simple first step",
+                    "target_angle": "User who needs one clear action",
+                    "hook": "Your first step with {product} can be simple.",
+                    "scene_breakdown": "Quick problem; product screen; campaign rule; CTA.",
+                    "script": "Show the situation, introduce {product}, highlight {points}, and close with a detail-check CTA.",
+                    "voiceover": "Get started by checking the details, the interface, and the real rules for {product}.",
+                    "captions": ["Simple first step", "Read the rules", "Check the details"],
+                    "visual_style": "Fast cuts with clear captions",
+                    "runway_prompt": "English short ad, fast clean cuts, real app UI, simple CTA, compliance-safe.",
+                    "elevenlabs_prompt": "English upbeat but restrained ad voice.",
+                    "facebook_primary_text": "Get started with a clear view: {product}, {points}, and real campaign rules.",
+                    "facebook_headline": "Start with details",
+                    "facebook_description": "Review the flow first.",
+                },
+                {
+                    "name": "Transparent terms",
+                    "target_angle": "User sensitive to campaign conditions",
+                    "hook": "Before joining, review the rules.",
+                    "scene_breakdown": "Rule cards; interface; benefit; landing page CTA.",
+                    "script": "Present {rules}, connect it to {points}, and keep the user's decision informed.",
+                    "voiceover": "Rules come first. Check the details and decide whether {product} fits your use case.",
+                    "captions": ["Rules first", "{rules}", "Decide clearly"],
+                    "visual_style": "Transparent rule cards over real UI",
+                    "runway_prompt": "English transparent offer ad, rule cards, real UI, clear captions, trustworthy tone.",
+                    "elevenlabs_prompt": "English calm explanatory voice.",
+                    "facebook_primary_text": "Clear rules before any action. Check {product} and decide with real information.",
+                    "facebook_headline": "Clear rules",
+                    "facebook_description": "Check before joining.",
+                },
+                {
+                    "name": "Daily routine context",
+                    "target_angle": "User deciding in an everyday mobile context",
+                    "hook": "In {scene}, a clear interface helps.",
+                    "scene_breakdown": "Daily routine; phone; product; key points; CTA.",
+                    "script": "Use {scene} as context, show {product}, and summarize {points} without promising outcomes.",
+                    "voiceover": "In your routine, clarity matters. Check {product}, review {points}, and read the rules.",
+                    "captions": ["Clarity in your routine", "{points}", "No exaggerated promises"],
+                    "visual_style": "Lifestyle plus product UI",
+                    "runway_prompt": "English lifestyle mobile ad, daily routine, real app interface, credible tone.",
+                    "elevenlabs_prompt": "English natural lifestyle ad voice.",
+                    "facebook_primary_text": "In {scene}, check {product}: {points}. Read the rules and decide clearly.",
+                    "facebook_headline": "Clarity to start",
+                    "facebook_description": "See the interface and rules.",
+                },
+            ]
+        return [
+            {
+                "name": "先看规则再行动",
+                "target_angle": "需要先理解活动边界的新用户",
+                "hook": "先看清{product}的真实规则。",
+                "scene_breakdown": "{scene}打开手机；真实界面；{points}；活动规则收尾。",
+                "script": "用用户疑问开场，展示{product}真实界面，说明{points}，最后提醒查看：{rules}。",
+                "voiceover": "先看{product}的真实界面和活动规则，再决定是否开始。",
+                "captions": ["先看真实规则", "{product}：{points}", "现在查看详情"],
+                "visual_style": "竖屏、移动端、真实界面特写",
+                "runway_prompt": "中文投流广告，真实手机界面，展示{product}，节奏清晰，不夸大承诺。",
+                "elevenlabs_prompt": "中文普通话旁白，可信、克制、清晰。",
+                "facebook_primary_text": "{product}：{points}。先看真实界面和活动规则，再决定是否参与。",
+                "facebook_headline": "查看{product}",
+                "facebook_description": "真实界面和清晰规则。",
+            },
+            {
+                "name": "真实界面演示",
+                "target_angle": "重视操作路径的谨慎用户",
+                "hook": "{product}在手机上可以这样看。",
+                "scene_breakdown": "手持手机；界面演示；卖点说明；CTA。",
+                "script": "展示真实屏幕，用一句话说明{points}，引导用户查看完整规则。",
+                "voiceover": "看清界面、理解重点，再基于真实规则做决定。",
+                "captions": ["真实界面", "{points}", "参与前先查看"],
+                "visual_style": "录屏感结合真实使用场景",
+                "runway_prompt": "中文移动端广告，手持手机，真实界面节奏，可信克制。",
+                "elevenlabs_prompt": "中文简洁可信口播。",
+                "facebook_primary_text": "看看{product}的真实使用路径。{points}，完整规则请以页面为准。",
+                "facebook_headline": "看看如何使用",
+                "facebook_description": "开始前先看规则。",
+            },
+            {
+                "name": "简单第一步",
+                "target_angle": "需要明确行动指引的用户",
+                "hook": "{product}的第一步可以很清楚。",
+                "scene_breakdown": "痛点；产品界面；规则；CTA。",
+                "script": "先给出场景，再展示{product}，突出{points}，最后提示查看详情。",
+                "voiceover": "先查看详情、界面和真实规则，再判断{product}是否适合你。",
+                "captions": ["第一步很清楚", "先读规则", "查看详情"],
+                "visual_style": "快节奏剪辑，字幕清晰",
+                "runway_prompt": "中文短视频广告，真实App界面，清晰CTA，合规表达。",
+                "elevenlabs_prompt": "中文轻快但克制的投流口播。",
+                "facebook_primary_text": "从清楚的信息开始：{product}、{points}和真实活动规则。",
+                "facebook_headline": "先看详情",
+                "facebook_description": "行动前看清流程。",
+            },
+            {
+                "name": "规则透明",
+                "target_angle": "重视活动条件的用户",
+                "hook": "参与前，先确认规则。",
+                "scene_breakdown": "规则卡片；真实界面；卖点；落地页CTA。",
+                "script": "展示{rules}，再连接{points}，让用户基于信息做决定。",
+                "voiceover": "规则先讲清楚。看看{product}是否符合你的使用场景。",
+                "captions": ["规则优先", "{rules}", "清楚再决定"],
+                "visual_style": "规则卡片叠加真实界面",
+                "runway_prompt": "中文透明活动规则广告，真实UI，字幕清晰，可信语气。",
+                "elevenlabs_prompt": "中文解释型口播，平稳可信。",
+                "facebook_primary_text": "先看规则，再看{product}。用真实信息做决定。",
+                "facebook_headline": "规则清楚",
+                "facebook_description": "参与前先确认。",
+            },
+            {
+                "name": "日常场景切入",
+                "target_angle": "在移动端日常场景中决策的用户",
+                "hook": "{scene}，清楚的界面更重要。",
+                "scene_breakdown": "日常场景；手机；产品；卖点；CTA。",
+                "script": "以{scene}切入，展示{product}并说明{points}，不承诺任何结果。",
+                "voiceover": "日常使用里，清楚和真实很重要。先看{product}、{points}和活动规则。",
+                "captions": ["日常也要看清楚", "{points}", "不做夸大承诺"],
+                "visual_style": "生活方式结合产品界面",
+                "runway_prompt": "中文生活化移动端广告，真实产品界面，可信克制。",
+                "elevenlabs_prompt": "中文自然生活化旁白。",
+                "facebook_primary_text": "{scene}，可以这样了解{product}：{points}。先读规则再行动。",
+                "facebook_headline": "清楚开始",
+                "facebook_description": "看界面，看规则。",
+            },
+        ]
+
+    def _localized_content(self, language, product_name, scene, goal, selling_points, campaign_rules, benchmark_hint):
+        if language == "pt-BR":
+            return {
+                "素材方向": f"Mostre o valor real de {product_name} em {scene}, com foco em {goal}.",
+                "脚本": {
+                    "10秒脚本": f"Abra com uma necessidade em {scene}, mostre a interface real de {product_name}, destaque {selling_points} e finalize com as regras da oferta.",
+                    "15秒脚本": f"Nos 3 primeiros segundos, apresente a dúvida do usuário. Depois, mostre logo e interface reais de {product_name}, explique {selling_points} e cite a regra: {campaign_rules}.",
+                    "30秒脚本": f"Conte a jornada em cinco partes: contexto, uso do produto, benefício, regra da campanha e CTA. Use apenas fatos confirmados sobre {product_name}.",
+                },
+                "旁白": f"Confira {product_name} com atenção às regras reais, à interface do produto e ao que faz sentido para o seu uso.",
+                "字幕": [f"{scene}: confira as regras reais", f"{product_name}: {selling_points}", "A campanha segue as regras da página", "Comece conferindo os detalhes"],
+                "分镜": [{"镜头": 1, "画面": scene, "目的": "Apresentar contexto e necessidade"}],
+                "Runway Prompt": f"Brazilian Portuguese ad video, real mobile usage scene, show {product_name} interface, clear pacing, no exaggerated claims.",
+                "HeyGen Prompt": f"Brazilian Portuguese spokesperson video, calm and credible tone, explain {product_name}: {selling_points}, remind users to check page rules.",
+                "ElevenLabs Prompt": "Brazilian Portuguese voiceover, natural rhythm, credible, clear, not exaggerated, suitable for performance ads.",
+                "Facebook广告文案": f"Confira {product_name}: {selling_points}. Veja a interface real e as regras antes de participar. Comece pelos detalhes.",
+                "TikTok广告文案": f"Veja como {product_name} funciona em {scene}. Regras claras, interface real e próximo passo simples. {benchmark_hint}",
+            }
+        if language == "es":
+            return {
+                "素材方向": f"Muestra el valor real de {product_name} en {scene}, con foco en {goal}.",
+                "脚本": {
+                    "10秒脚本": f"Abre con una necesidad en {scene}, muestra la interfaz real de {product_name}, destaca {selling_points} y cierra con las reglas.",
+                    "15秒脚本": f"En los primeros 3 segundos, presenta la duda del usuario. Luego muestra logo e interfaz reales de {product_name}, explica {selling_points} y cita la regla: {campaign_rules}.",
+                    "30秒脚本": f"Cuenta la historia en cinco partes: contexto, uso del producto, beneficio, regla de campaña y CTA. Usa solo hechos confirmados de {product_name}.",
+                },
+                "旁白": f"Consulta {product_name} revisando las reglas reales, la interfaz del producto y si encaja con tu forma de uso.",
+                "字幕": [f"{scene}: consulta las reglas reales", f"{product_name}: {selling_points}", "La campaña sigue las reglas de la página", "Comienza revisando los detalles"],
+                "分镜": [{"镜头": 1, "画面": scene, "目的": "Presentar contexto y necesidad"}],
+                "Runway Prompt": f"Spanish ad video, real mobile usage scene, show {product_name} interface, clear pacing, no exaggerated claims.",
+                "HeyGen Prompt": f"Spanish spokesperson video, credible calm tone, explain {product_name}: {selling_points}, remind users to check page rules.",
+                "ElevenLabs Prompt": "Spanish voiceover, natural rhythm, credible, clear, not exaggerated, suitable for performance ads.",
+                "Facebook广告文案": f"Consulta {product_name}: {selling_points}. Revisa la interfaz real y las reglas antes de participar. Comienza por los detalles.",
+                "TikTok广告文案": f"Así puedes revisar {product_name} en {scene}: reglas claras, interfaz real y próximo paso simple. Comienza por los detalles. {benchmark_hint}",
+            }
+        if language == "en":
+            return {
+                "素材方向": f"Show the real value of {product_name} in {scene}, focused on {goal}.",
+                "脚本": {
+                    "10秒脚本": f"Open with a need in {scene}, show the real {product_name} interface, highlight {selling_points}, and close with the offer rules.",
+                    "15秒脚本": f"In the first 3 seconds, introduce the user's question. Then show the real logo and interface for {product_name}, explain {selling_points}, and state the rule: {campaign_rules}.",
+                    "30秒脚本": f"Build five beats: context, product use, benefit, campaign rule, and CTA. Use only confirmed facts about {product_name}.",
+                },
+                "旁白": f"Check {product_name} by reviewing the real rules, the product interface, and whether it fits your use case.",
+                "字幕": [f"{scene}: check the real rules", f"{product_name}: {selling_points}", "Campaign terms follow the landing page", "Get started by checking the details"],
+                "分镜": [{"镜头": 1, "画面": scene, "目的": "Set context and user need"}],
+                "Runway Prompt": f"English ad video, real mobile usage scene, show {product_name} interface, clear pacing, no exaggerated claims.",
+                "HeyGen Prompt": f"English spokesperson video, calm credible tone, explain {product_name}: {selling_points}, remind users to check page rules.",
+                "ElevenLabs Prompt": "English voiceover, natural rhythm, credible, clear, not exaggerated, suitable for performance ads. Get started with a confident but restrained tone.",
+                "Facebook广告文案": f"Check {product_name}: {selling_points}. Review the real interface and rules before joining. Get started with the details.",
+                "TikTok广告文案": f"See how {product_name} works in {scene}: clear rules, real interface, simple next step. {benchmark_hint}",
+            }
+        return {
+            "素材方向": f"围绕{scene}展示{product_name}的真实使用价值，目标是{goal}。",
+            "脚本": {
+                "10秒脚本": f"开场点出{scene}的需求，展示{product_name}真实界面，强调{selling_points}，结尾提示查看活动规则。",
+                "15秒脚本": f"前3秒提出用户困扰，中段用真实logo和界面展示{product_name}，说明{selling_points}，最后引用活动规则：{campaign_rules}。",
+                "30秒脚本": f"用生活场景切入，拆成痛点、产品操作、卖点解释、活动规则、CTA五段；全程只表达{product_name}已确认事实，不做夸大承诺。",
+            },
+            "旁白": f"如果你也在{scene}需要更清晰的选择，可以看看{product_name}。重点看真实界面、真实规则和适合自己的操作路径。",
+            "字幕": [f"{scene}，先看真实规则", f"{product_name}：{selling_points}", "活动以页面展示为准", "现在查看详情"],
+            "分镜": [{"镜头": 1, "画面": scene, "目的": "建立人群和问题"}],
+            "Runway Prompt": f"中文广告短视频，真实手机使用场景，展示{product_name}界面，不虚构收益，节奏清晰，画面干净。",
+            "HeyGen Prompt": f"中文口播，语气可信克制，说明{product_name}的真实卖点：{selling_points}，提醒活动以页面规则为准。",
+            "ElevenLabs Prompt": "中文普通话旁白，节奏自然，可信、清晰、不夸张，适合投流素材。",
+            "Facebook广告文案": f"{product_name}适合关注{goal}的用户。先看真实界面和活动规则，再决定是否参与。",
+            "TikTok广告文案": f"{scene}可以这样看{product_name}：真实界面、真实规则、重点清楚。{benchmark_hint}",
+        }
 
 
 class OpenAIProvider(MockAIProvider):

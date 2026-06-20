@@ -48,26 +48,32 @@ class MockAIProviderTests(unittest.TestCase):
         result = self.provider.audit_materials(self.product, demand, materials)
         self.assertEqual(result["status"], "FATAL_FAILED")
         self.assertIn("保证收益", " ".join(result["risks"]))
+        self.assertIn("替代表达建议", result)
 
-    def test_generate_content_returns_required_chinese_outputs(self):
-        audit = {"status": "PASS", "summary": "素材足够"}
-        materials = [{"name": "真实logo", "grade": "必须人工补充的红线素材", "compliant": 1}]
-        result = self.provider.generate_content(self.product, self.demand, materials, [], audit)
-        self.assertIn("素材方向", result)
-        self.assertIn("10秒脚本", result["脚本"])
-        self.assertIn("15秒脚本", result["脚本"])
-        self.assertIn("30秒脚本", result["脚本"])
-        self.assertIn("Runway Prompt", result)
-        self.assertIn("HeyGen Prompt", result)
-        self.assertIn("ElevenLabs Prompt", result)
-        self.assertIn("Facebook广告文案", result)
-        self.assertIn("TikTok广告文案", result)
+    def test_generate_content_returns_upgraded_mock_outputs(self):
+        result = self.provider.generate_content(self.product, self.demand, [], [], {"status": "PASS", "summary": "素材足够"})
+        self.assertIn("campaign_summary", result)
+        self.assertIn("video_ad_concepts", result)
+        self.assertEqual(len(result["video_ad_concepts"]), 5)
+        self.assertIn("scoring_report", result)
+        self.assertIn("media_production_notes", result)
+        self.assertIn("launch_plan", result)
+        self.assertIn("forbidden_claims_check", result)
+        for concept in result["video_ad_concepts"]:
+            self.assertIn("runway_prompt", concept)
+            self.assertIn("elevenlabs_prompt", concept)
+            self.assertIn("facebook_primary_text", concept)
+            self.assertIn("facebook_headline", concept)
+            self.assertIn("facebook_description", concept)
+            self.assertIn("15s_script", concept)
+        self.assertEqual(result["scoring_report"]["total_score"], 90)
 
     def test_generate_content_uses_pt_br_when_requested(self):
         product = dict(self.product, name="CopyTrade Pro", selling_points="bônus de cadastro, copy trading, início rápido")
         demand = {"raw_input": "Facebook Brasil 15s", "structured": {"语言": "pt-BR", "场景": "uso no celular", "目标": "cadastro"}}
         result = self.provider.generate_content(product, demand, [], [], {"status": "PASS"})
-        official_text = " ".join([result["旁白"], result["脚本"]["15秒脚本"], result["Facebook广告文案"], result["Runway Prompt"]])
+        concept = result["video_ad_concepts"][0]
+        official_text = " ".join([concept["hook"], concept["15s_script"], concept["voiceover"], concept["facebook_primary_text"], concept["runway_prompt"]])
         self.assertIn("Confira", official_text)
         self.assertIn("Comece", official_text)
         self.assertNotIn("真实", official_text)
@@ -76,7 +82,8 @@ class MockAIProviderTests(unittest.TestCase):
         product = dict(self.product, name="CopyTrade Pro", selling_points="bono de registro, copy trading, inicio rápido")
         demand = {"raw_input": "Facebook México 15s", "structured": {"语言": "es", "场景": "uso móvil", "目标": "registro"}}
         result = self.provider.generate_content(product, demand, [], [], {"status": "PASS"})
-        official_text = " ".join([result["旁白"], result["脚本"]["15秒脚本"], result["TikTok广告文案"], result["HeyGen Prompt"]])
+        concept = result["video_ad_concepts"][0]
+        official_text = " ".join([concept["hook"], concept["15s_script"], concept["voiceover"], concept["facebook_primary_text"], concept["elevenlabs_prompt"]])
         self.assertIn("Consulta", official_text)
         self.assertIn("Comienza", official_text)
         self.assertNotIn("真实", official_text)
@@ -85,7 +92,8 @@ class MockAIProviderTests(unittest.TestCase):
         product = dict(self.product, name="CopyTrade Pro", selling_points="signup reward, copy trading, quick start")
         demand = {"raw_input": "Facebook US 15s", "structured": {"语言": "en", "场景": "mobile browsing", "目标": "signup"}}
         result = self.provider.generate_content(product, demand, [], [], {"status": "PASS"})
-        official_text = " ".join([result["旁白"], result["脚本"]["15秒脚本"], result["Facebook广告文案"], result["ElevenLabs Prompt"]])
+        concept = result["video_ad_concepts"][0]
+        official_text = " ".join([concept["hook"], concept["15s_script"], concept["voiceover"], concept["facebook_primary_text"], concept["elevenlabs_prompt"]])
         self.assertIn("Check", official_text)
         self.assertIn("Get started", official_text)
         self.assertNotIn("真实", official_text)

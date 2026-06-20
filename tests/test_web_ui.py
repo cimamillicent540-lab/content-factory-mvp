@@ -37,4 +37,4 @@ class WebUiTests(unittest.TestCase):
         self.assertIn("BLOCKED", body)
         self.assertIn("generation_id", body)
         self.assertIn("素材内容", body)
-        self.assertNotIn("中文" + "素材内容", body)
+        self.assertIn("JSON.stringify", body)
