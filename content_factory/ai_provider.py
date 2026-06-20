@@ -488,10 +488,21 @@ class OpenAIProvider(MockAIProvider):
         response = self.client.responses.create(
             model=self.model,
             input=prompt,
-            response_format={"type": "json_object"},
+            text={"format": self._json_text_format()},
         )
         text = self._response_text(response)
         return self._parse_json(text)
+
+    def _json_text_format(self):
+        return {
+            "type": "json_schema",
+            "name": "content_factory_json",
+            "schema": {
+                "type": "object",
+                "additionalProperties": True,
+            },
+            "strict": False,
+        }
 
     def _response_text(self, response):
         if isinstance(response, str):
