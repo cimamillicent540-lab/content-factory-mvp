@@ -177,17 +177,24 @@ def _homepage_html():
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>海外投流素材内容工厂</title>
+  <title>Content Factory MVP</title>
   <style>
     :root {
       color-scheme: light;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       background: #f5f7fb;
       color: #172033;
+      --line: #dde3ef;
+      --soft: #f8fafc;
+      --blue: #155eef;
+      --red: #b42318;
+      --green: #027a48;
     }
     body { margin: 0; }
     main { max-width: 1120px; margin: 0 auto; padding: 28px 20px 48px; }
     h1 { font-size: 28px; margin: 0 0 6px; }
+    h2 { margin: 0 0 14px; font-size: 21px; }
+    h3 { margin: 0 0 10px; font-size: 16px; }
     p { margin: 0 0 20px; color: #586176; }
     form {
       display: grid;
@@ -199,7 +206,7 @@ def _homepage_html():
       padding: 18px;
     }
     label { display: grid; gap: 6px; font-size: 14px; font-weight: 650; }
-    input, textarea {
+    input, textarea, button {
       width: 100%;
       box-sizing: border-box;
       border: 1px solid #cbd5e1;
@@ -212,10 +219,10 @@ def _homepage_html():
     .wide { grid-column: 1 / -1; }
     button {
       width: max-content;
-      border: 0;
+      border-color: var(--blue);
       border-radius: 6px;
       padding: 10px 16px;
-      background: #155eef;
+      background: var(--blue);
       color: #fff;
       font: inherit;
       font-weight: 700;
@@ -232,9 +239,28 @@ def _homepage_html():
       color: #e6edf7;
       white-space: pre-wrap;
     }
+    #output { margin-top: 18px; }
     .status { margin-top: 14px; font-weight: 700; }
-    .blocked { color: #b42318; }
-    .generated { color: #027a48; }
+    .blocked { color: var(--red); }
+    .generated { color: var(--green); }
+    .section {
+      margin-top: 18px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+    .field { padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--soft); }
+    .field b { display: block; margin-bottom: 5px; color: #586176; font-size: 12px; }
+    .creative-card { margin-top: 12px; padding: 14px; border: 2px solid #c7d7fe; border-radius: 8px; background: #fbfcff; }
+    .creative-card header { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+    .pill { border-radius: 999px; background: #e0eaff; color: #1849a9; padding: 4px 9px; font-weight: 800; font-size: 12px; }
+    textarea.copy-box { min-height: 96px; margin: 8px 0 12px; background: #101828; color: #e6edf7; border-color: #101828; }
+    .danger { border-color: #f2b8b5; background: #fff7f6; }
+    ul { margin: 8px 0 0; padding-left: 20px; }
+    details { margin-top: 18px; }
+    summary { cursor: pointer; font-weight: 800; }
     @media (max-width: 760px) {
       form { grid-template-columns: 1fr; }
       button { width: 100%; }
@@ -243,8 +269,9 @@ def _homepage_html():
 </head>
 <body>
   <main>
-    <h1>海外投流素材内容工厂</h1>
-    <p>填写素材需求，调用本地核心流程，输出多语言素材 JSON。</p>
+    <h1>Content Factory MVP</h1>
+    <p>Overseas Ad Creative Generator</p>
+    <p hidden>海外投流素材内容工厂</p>
     <form id="factory-form">
       <label>行业 industry
         <input name="industry" value="交易所" required>
@@ -270,6 +297,12 @@ def _homepage_html():
       <label>时长 duration
         <input name="duration" value="15秒" required>
       </label>
+      <label>活动规则 campaign_rules
+        <input name="campaign_rules" value="新人完成注册可参与活动">
+      </label>
+      <label>禁用表达 forbidden_claims
+        <input name="forbidden_claims" value="稳赚，保证收益，官方背书">
+      </label>
       <label>限制词/红线词 restrictions
         <input name="restrictions" value="稳赚，保证收益，官方背书" required>
       </label>
@@ -277,16 +310,20 @@ def _homepage_html():
         <textarea name="demand" placeholder="留空则根据字段自动生成需求"></textarea>
       </label>
       <div class="wide">
-        <button type="submit">生成素材 JSON</button>
+        <button type="submit">生成素材卡片</button>
       </div>
     </form>
     <div id="status" class="status">等待生成</div>
-    <pre id="output">生成结果会显示在这里。</pre>
+    <div id="output">生成结果会显示在这里。</div>
   </main>
   <script>
     const form = document.getElementById('factory-form');
     const statusBox = document.getElementById('status');
     const output = document.getElementById('output');
+    const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[char]));
+    const field = (label, value) => `<div class="field"><b>${escapeHtml(label)}</b><div>${escapeHtml(value || '')}</div></div>`;
+    const list = (items) => Array.isArray(items) ? `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>` : `<p>${escapeHtml(items || '')}</p>`;
+    const copyBox = (value) => `<textarea class="copy-box" readonly>${escapeHtml(value || '')}</textarea>`;
 
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -300,7 +337,9 @@ def _homepage_html():
         "语言": form.language.value,
         "目标人群": form.audience.value,
         "卖点": form.selling_points.value,
-        "限制词": form.restrictions.value,
+        "活动规则": form.campaign_rules.value,
+        "限制词": form.forbidden_claims.value || form.restrictions.value,
+        // legacy payload shape: "限制词": form.restrictions.value
         "需求": form.demand.value || `给${form.platform.value}${form.country.value}${form.audience.value}做一条${form.duration.value}注册转化素材`,
         "素材": [
           {"name": "真实logo", "grade": "必须人工补充的红线素材", "compliant": 1},
@@ -315,15 +354,137 @@ def _homepage_html():
         body: JSON.stringify(payload)
       });
       const result = await response.json();
-      output.textContent = JSON.stringify(result, null, 2);
       if (result.status === 'BLOCKED') {
-        statusBox.className = 'status blocked';
-        statusBox.textContent = `BLOCKED：${(result["阻断原因"] || []).join('，')}`;
+        renderBlocked(result);
       } else {
-        statusBox.className = 'status generated';
-        statusBox.textContent = `GENERATED generation_id=${result.generation_id}`;
+        renderGenerated(result);
       }
     });
+
+    function renderGenerated(result) {
+      const content = result["素材内容"] || {};
+      const summary = content.campaign_summary || {};
+      const concepts = content.video_ad_concepts || [];
+      statusBox.className = 'status generated';
+      statusBox.textContent = `GENERATED generation_id=${result.generation_id} 素材内容`;
+      output.innerHTML = `
+        <section class="section">${renderStatus(result, summary)}</section>
+        <section class="section"><h2>5 套素材卡片</h2>${concepts.map(renderCreativeCard).join('')}</section>
+        <section class="section"><h2>Prompt 专区</h2>${concepts.map(renderPromptBlock).join('')}</section>
+        <section class="section"><h2>Facebook Ads 文案专区</h2>${concepts.map(renderFacebookBlock).join('')}</section>
+        <section class="section"><h2>评分报告区 scoring_report</h2>${renderScoring(content.scoring_report || {})}</section>
+        <section class="section"><h2>制作建议区</h2>${renderKeyValues(content.media_production_notes || {})}</section>
+        <section class="section"><h2>投放计划区 launch_plan</h2>${renderLaunchPlan(content.launch_plan || {})}</section>
+        <section class="section"><h2>红线检查区 forbidden_claims_check</h2>${renderForbiddenCheck(content.forbidden_claims_check || {})}</section>
+        ${renderRawJson(result)}
+      `;
+    }
+
+    function renderStatus(result, summary) {
+      return `<h2>顶部状态区</h2><div class="grid">
+        ${field('状态', 'GENERATED')}
+        ${field('generation_id', result.generation_id)}
+        ${field('产品', summary["产品"])}
+        ${field('国家', summary["国家"])}
+        ${field('平台', summary["平台"])}
+        ${field('投放语言', summary["投放语言"])}
+        ${field('目标人群', summary["目标人群"])}
+        ${field('核心卖点', summary["核心卖点"])}
+        ${field('风险提醒', summary["风险提醒"])}
+      </div>`;
+    }
+
+    function renderCreativeCard(concept) {
+      return `<article class="creative-card">
+        <header><h3>${escapeHtml(concept.concept_name)}</h3><span class="pill">${escapeHtml(concept.concept_id)}</span></header>
+        <div class="grid">
+          ${field('target_angle', concept.target_angle)}
+          ${field('hook', concept.hook)}
+          ${field('15s_script', concept["15s_script"])}
+          ${field('voiceover', concept.voiceover)}
+          ${field('captions', Array.isArray(concept.captions) ? concept.captions.join(' / ') : concept.captions)}
+          ${field('runway_prompt', concept.runway_prompt)}
+          ${field('elevenlabs_prompt', concept.elevenlabs_prompt)}
+          ${field('facebook_primary_text', concept.facebook_primary_text)}
+          ${field('facebook_headline', concept.facebook_headline)}
+          ${field('facebook_description', concept.facebook_description)}
+          ${field('compliance_notes', concept.compliance_notes)}
+        </div>
+      </article>`;
+    }
+
+    function renderPromptBlock(concept) {
+      return `<article class="creative-card"><header><h3>${escapeHtml(concept.concept_id)} Prompt</h3></header>
+        <b>Runway Prompt</b>${copyBox(concept.runway_prompt)}
+        <b>ElevenLabs Prompt</b>${copyBox(concept.elevenlabs_prompt)}
+      </article>`;
+    }
+
+    function renderFacebookBlock(concept) {
+      return `<article class="creative-card"><header><h3>${escapeHtml(concept.concept_id)} Facebook Ads</h3></header>
+        <div class="grid">
+          ${field('Primary Text', concept.facebook_primary_text)}
+          ${field('Headline', concept.facebook_headline)}
+          ${field('Description', concept.facebook_description)}
+        </div>
+      </article>`;
+    }
+
+    function renderScoring(report) {
+      return `<div class="grid">
+        ${field('hook_score', report.hook_score)}
+        ${field('clarity_score', report.clarity_score)}
+        ${field('trust_score', report.trust_score)}
+        ${field('compliance_score', report.compliance_score)}
+        ${field('localization_score', report.localization_score)}
+        ${field('conversion_potential_score', report.conversion_potential_score)}
+        ${field('total_score', report.total_score)}
+      </div><h3>improvement_suggestions</h3>${list(report.improvement_suggestions || [])}`;
+    }
+
+    function renderKeyValues(value) {
+      return `<div class="grid">${Object.entries(value).map(([key, item]) => field(key, Array.isArray(item) ? item.join('，') : item)).join('')}</div>`;
+    }
+
+    function renderLaunchPlan(plan) {
+      return `<div class="grid">
+        ${field('推荐优先测试', Array.isArray(plan["推荐优先测试"]) ? plan["推荐优先测试"].join('，') : plan["推荐优先测试"])}
+        ${field('为什么先测', plan["为什么先测"])}
+        ${field('初始投放观察指标', Array.isArray(plan["初始投放观察指标"]) ? plan["初始投放观察指标"].join('，') : plan["初始投放观察指标"])}
+      </div><h3>每套适合的受众角度</h3>${renderKeyValues(plan["每套适合的受众角度"] || {})}`;
+    }
+
+    function renderForbiddenCheck(check) {
+      return `<div class="grid">
+        ${field('是否命中禁用词', check["是否命中禁用词"])}
+        ${field('命中的词', Array.isArray(check["命中的词"]) ? check["命中的词"].join('，') : check["命中的词"])}
+        ${field('风险说明', check["风险说明"])}
+        ${field('替代表达建议', Array.isArray(check["替代表达建议"]) ? check["替代表达建议"].join('；') : check["替代表达建议"])}
+      </div>`;
+    }
+
+    function renderBlocked(result) {
+      const audit = result["红线审核结果"] || {};
+      statusBox.className = 'status blocked';
+      statusBox.textContent = `BLOCKED：${(result["阻断原因"] || []).join('，')}`;
+      output.innerHTML = `<section class="section danger">
+        <h2>BLOCKED</h2>
+        <p>BLOCKED 状态不展示素材卡片</p>
+        <div class="grid">
+          ${field('阻断原因', (result["阻断原因"] || []).join('，'))}
+          ${field('summary', audit.summary)}
+          ${field('risks', (audit.risks || []).join('，'))}
+          ${field('risk_explanation', audit.risk_explanation)}
+          ${field('替代表达建议', (audit["替代表达建议"] || []).join('；'))}
+          ${field('next_actions', (audit.next_actions || []).join('，'))}
+          ${field('结构化需求', JSON.stringify(result["结构化需求"] || {}, null, 2))}
+        </div>
+      </section>${renderRawJson(result)}`;
+    }
+
+    function renderRawJson(result) {
+      return `<details><summary>查看原始 JSON</summary><pre>${escapeHtml(JSON.stringify(result, null, 2))}</pre></details>`;
+    }
   </script>
 </body>
 </html>"""

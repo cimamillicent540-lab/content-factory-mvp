@@ -38,3 +38,30 @@ class WebUiTests(unittest.TestCase):
         self.assertIn("generation_id", body)
         self.assertIn("素材内容", body)
         self.assertIn("JSON.stringify", body)
+
+    def test_homepage_renders_generated_creative_sections(self):
+        _status, _headers, body = self.app.handle("GET", "/")
+
+        self.assertIn("Content Factory MVP", body)
+        self.assertIn("Overseas Ad Creative Generator", body)
+        self.assertIn('name="campaign_rules"', body)
+        self.assertIn('name="forbidden_claims"', body)
+        self.assertIn("renderGenerated", body)
+        self.assertIn("creative-card", body)
+        self.assertIn("video_ad_concepts", body)
+        self.assertIn("runway_prompt", body)
+        self.assertIn("elevenlabs_prompt", body)
+        self.assertIn("facebook_primary_text", body)
+        self.assertIn("facebook_headline", body)
+        self.assertIn("facebook_description", body)
+        self.assertIn("scoring_report", body)
+        self.assertIn("launch_plan", body)
+        self.assertIn("forbidden_claims_check", body)
+
+    def test_homepage_renders_blocked_state_without_creative_cards(self):
+        _status, _headers, body = self.app.handle("GET", "/")
+
+        self.assertIn("renderBlocked", body)
+        self.assertIn("阻断原因", body)
+        self.assertIn("替代表达建议", body)
+        self.assertIn("BLOCKED 状态不展示素材卡片", body)
