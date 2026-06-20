@@ -81,6 +81,57 @@ class ServicePipelineTests(unittest.TestCase):
         self.assertIn("Comece", concept["facebook_primary_text"])
         self.assertNotIn("真实", concept["voiceover"])
 
+    def test_pipeline_preserves_requested_audience_in_mock_generation(self):
+        request = {
+            "行业": "交易所",
+            "产品": "CopyTrade Pro",
+            "目标人群": "Brazilian first-time crypto users aged 25-40",
+            "投放平台": "Facebook",
+            "语言": "pt-BR",
+            "国家": "巴西",
+            "卖点": "fast deposits, clean interface, new user campaign",
+            "活动规则": "new users must complete KYC before campaign eligibility",
+            "限制词": "稳赚，保证收益，官方背书",
+            "素材": [
+                {"name": "真实logo", "grade": "必须人工补充的红线素材", "compliant": 1},
+                {"name": "真实界面", "grade": "必须人工补充的红线素材", "compliant": 1},
+                {"name": "真实活动规则", "grade": "必须人工补充的红线素材", "compliant": 1},
+            ],
+        }
+
+        result = run_content_pipeline(self.conn, self.provider, request)
+        content = result["素材内容"]
+        concept = content["video_ad_concepts"][0]
+
+        self.assertEqual(content["campaign_summary"]["目标人群"], "Brazilian first-time crypto users aged 25-40")
+        self.assertIn("Brazilian first-time crypto users aged 25-40", concept["target_angle"])
+
+    def test_blocked_pipeline_preserves_requested_audience_in_structured_demand(self):
+        request = {
+            "行业": "金融工具",
+            "产品": "测试钱包",
+            "目标人群": "Brazilian first-time crypto users aged 25-40",
+            "投放平台": "TikTok",
+            "语言": "中文",
+            "国家": "巴西",
+            "卖点": "到账快，界面清晰，新人活动",
+            "活动规则": "新人完成注册可参与活动",
+            "限制词": "稳赚，保证收益，官方背书",
+            "需求": "做一条 guaranteed profit 广告",
+            "素材": [
+                {"name": "真实logo", "grade": "必须人工补充的红线素材", "compliant": 1},
+                {"name": "真实界面", "grade": "必须人工补充的红线素材", "compliant": 1},
+                {"name": "真实活动规则", "grade": "必须人工补充的红线素材", "compliant": 1},
+            ],
+        }
+
+        result = run_content_pipeline(self.conn, self.provider, request)
+        structured = loads_json(self.conn.execute("SELECT structured_json FROM demand_intakes").fetchone()["structured_json"])
+
+        self.assertEqual(result["状态"], "BLOCKED")
+        self.assertEqual(result["结构化需求"]["人群"], "Brazilian first-time crypto users aged 25-40")
+        self.assertEqual(structured["人群"], "Brazilian first-time crypto users aged 25-40")
+
     def test_pipeline_saves_block_reason_without_generation_when_redline_hit(self):
         request = {
             "行业": "金融工具",

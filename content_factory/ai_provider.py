@@ -16,16 +16,14 @@ class MockAIProvider:
         platform = self._first_match(text, ("TikTok", "Facebook", "Instagram")) or product_context.get("platform") or "未指定"
         country = self._first_match(text, ("巴西", "美国", "墨西哥", "西班牙", "葡萄牙")) or product_context.get("country") or "未指定"
         duration = self._first_match(text, ("10秒", "15秒", "30秒")) or "15秒"
-        audience = "新用户" if "新" in text else "目标用户"
+        audience = self._extract_audience(text, product_context)
         goal = "注册转化" if "注册" in text else "点击转化" if "点击" in text else "素材测试"
         scenario = "下班后用手机" if "下班" in text else "移动端浏览场景"
-
         missing_info = []
         if platform == "未指定":
             missing_info.append("平台")
         if country == "未指定":
             missing_info.append("国家")
-
         return {
             "平台": platform,
             "国家": country,
@@ -59,9 +57,6 @@ class MockAIProvider:
                 raw_input,
                 product.get("name", ""),
                 product.get("selling_points", ""),
-                product.get("campaign_rules", ""),
-                product.get("notes", ""),
-                product.get("compliance_redlines", ""),
             )
         ).lower()
         risks = [claim for claim in forbidden_claims if claim and claim.lower() in risk_text]
@@ -76,7 +71,6 @@ class MockAIProvider:
                 "替代表达建议": self._alternative_claims(risks),
                 "next_actions": ["删除禁用表达", "重新提交符合合规边界的需求"],
             }
-
         required = ("真实logo", "真实界面", "真实活动规则")
         material_text = " ".join(
             f"{item.get('name', '')} {item.get('grade', '')} {item.get('notes', '')}"
@@ -84,7 +78,6 @@ class MockAIProvider:
         )
         missing = [name for name in required if name not in material_text]
         non_compliant = [item.get("name", "未命名素材") for item in materials if not int(item.get("compliant", 1))]
-
         if non_compliant:
             return {
                 "status": "FATAL_FAILED",
@@ -94,7 +87,6 @@ class MockAIProvider:
                 "risks": [f"不合规素材：{name}" for name in non_compliant],
                 "next_actions": ["移除或替换不合规素材", "重新执行素材评估"],
             }
-
         if missing:
             status = "HUMAN_REQUIRED" if "真实logo" in missing or "真实界面" in missing else "AUTO_REPAIR"
             return {
@@ -105,7 +97,6 @@ class MockAIProvider:
                 "risks": [],
                 "next_actions": [f"补充{name}" for name in missing],
             }
-
         return {
             "status": "PASS",
             "summary": "产品事实和红线素材足够，可进入内容生成。",
@@ -119,10 +110,11 @@ class MockAIProvider:
         structured = demand.get("structured", {})
         language = self._normalize_language(structured.get("语言", "zh"))
         product_name = product.get("name", "该产品")
+        audience = structured.get("人群") or self._extract_audience(demand.get("raw_input", ""), product)
         scene = self._localized_scene(language, structured.get("场景", "移动端使用场景"))
         goal = self._localized_goal(language, structured.get("目标", "转化"))
         selling_points = self._localized_points(language, product.get("selling_points") or "真实卖点")
-        campaign_rules = self._localized_rules(language, product.get("campaign_rules") or "以落地页真实活动规则为准")
+        campaign_rules = product.get("campaign_rules") or "以落地页真实活动规则为准"
         benchmark_hint = self._localized_benchmark_hint(language)
         if benchmarks:
             benchmark_hint = benchmarks[0].get("可复用结构") or benchmark_hint
@@ -132,7 +124,7 @@ class MockAIProvider:
                 "产品": product_name,
                 "国家": structured.get("国家") or product.get("country", ""),
                 "平台": structured.get("平台") or product.get("platform", ""),
-                "目标人群": structured.get("人群", "目标用户"),
+                "目标人群": audience,
                 "投放语言": language,
                 "核心卖点": selling_points,
                 "风险提醒": "仅使用已确认产品事实和真实活动规则，不承诺收益、不暗示无风险。",
@@ -140,6 +132,7 @@ class MockAIProvider:
             "video_ad_concepts": self._video_ad_concepts(
                 language,
                 product_name,
+                audience,
                 scene,
                 goal,
                 selling_points,
@@ -189,7 +182,6 @@ class MockAIProvider:
         elif status in ("HUMAN_REQUIRED", "FATAL_FAILED"):
             scores["真实性与红线素材"] = 5
             scores["合规与风险"] = 2
-
         total = sum(scores.values())
         return {
             "总分": total,
@@ -209,7 +201,6 @@ class MockAIProvider:
         play_3s = float(performance_log.get("play_3s", 0) or 0)
         play_50 = float(performance_log.get("play_50", 0) or 0)
         retention_50 = play_50 / play_3s if play_3s else 0
-
         if ctr >= 1.0 and (cpa == 0 or cpa <= 30):
             action = "保留并放大预算，同时测试相同结构的新开头。"
             judgment = "点击和成本表现较好。"
@@ -219,7 +210,6 @@ class MockAIProvider:
         else:
             action = "保留卖点结构，测试更直接的CTA和更短版本。"
             judgment = "表现中性，适合小步迭代。"
-
         return {
             "表现判断": judgment,
             "关键指标": {"CTR": ctr, "CPA": cpa, "50%播放留存": round(retention_50, 4)},
@@ -245,6 +235,17 @@ class MockAIProvider:
             if candidate in text:
                 return candidate
         return None
+
+    def _extract_audience(self, text, product_context):
+        configured = product_context.get("audience") or product_context.get("目标人群")
+        if configured:
+            return configured
+        parts = [part.strip() for part in (text or "").replace("，", ",").split(",") if part.strip()]
+        if len(parts) >= 3:
+            return parts[2]
+        if "新用户" in (text or ""):
+            return "新用户"
+        return "目标用户"
 
     def _normalize_language(self, value):
         normalized = (value or "zh").strip().lower()
@@ -277,6 +278,14 @@ class MockAIProvider:
         return goal
 
     def _localized_points(self, language, points):
+        normalized = (points or "").strip().lower()
+        if any(token in normalized for token in ("fast deposits", "clean interface", "new user campaign", "signup reward", "copy trading", "quick start")):
+            return {
+                "pt-BR": "depósitos rápidos, interface clara e campanha para novos usuários",
+                "es": "depósitos rápidos, interfaz clara y campaña para nuevos usuarios",
+                "en": "fast deposits, clean interface, and a new user campaign",
+                "zh": "到账快、界面清晰、新人活动",
+            }[language]
         if "注册奖励" in points and "跟单" in points:
             return {
                 "pt-BR": "bônus de cadastro, copy trading, início rápido",
@@ -344,8 +353,6 @@ class MockAIProvider:
                 demand.get("raw_input", ""),
                 product.get("name", ""),
                 product.get("selling_points", ""),
-                product.get("campaign_rules", ""),
-                product.get("notes", ""),
             )
         ).lower()
         hits = [claim for claim in self._forbidden_claims(product.get("forbidden_claims", "")) if claim.lower() in text]
@@ -356,41 +363,53 @@ class MockAIProvider:
             "替代表达建议": self._alternative_claims(hits),
         }
 
-    def _video_ad_concepts(self, language, product_name, scene, goal, selling_points, campaign_rules, benchmark_hint):
+    def _video_ad_concepts(self, language, product_name, audience, scene, goal, selling_points, campaign_rules, benchmark_hint):
         angles = self._localized_concept_angles(language)
         concepts = []
         for index, angle in enumerate(angles, start=1):
             concept_id = f"C{index:02d}"
+            runway_prompt = angle["runway_prompt"].format(product=product_name, scene=scene, points=selling_points, hint=benchmark_hint)
             concepts.append(
                 {
                     "concept_id": concept_id,
                     "concept_name": angle["name"],
-                    "target_angle": angle["target_angle"],
+                    "target_angle": angle["target_angle"].format(audience=audience),
                     "hook": angle["hook"].format(product=product_name, scene=scene, points=selling_points),
-                    "scene_breakdown": angle["scene_breakdown"].format(product=product_name, scene=scene, points=selling_points, rules=campaign_rules),
-                    "15s_script": angle["script"].format(product=product_name, scene=scene, points=selling_points, rules=campaign_rules),
-                    "voiceover": angle["voiceover"].format(product=product_name, scene=scene, points=selling_points, rules=campaign_rules),
-                    "captions": [caption.format(product=product_name, scene=scene, points=selling_points, rules=campaign_rules) for caption in angle["captions"]],
+                    "scene_breakdown": angle["scene_breakdown"].format(product=product_name, scene=scene, points=selling_points),
+                    "15s_script": angle["script"].format(product=product_name, scene=scene, points=selling_points),
+                    "voiceover": angle["voiceover"].format(product=product_name, scene=scene, points=selling_points),
+                    "captions": [caption.format(product=product_name, scene=scene, points=selling_points) for caption in angle["captions"]],
                     "visual_style": angle["visual_style"],
-                    "runway_prompt": angle["runway_prompt"].format(product=product_name, scene=scene, points=selling_points, hint=benchmark_hint),
+                    "runway_prompt": f"{runway_prompt} {self._runway_language_instruction(language)}",
                     "elevenlabs_prompt": angle["elevenlabs_prompt"],
                     "facebook_primary_text": angle["facebook_primary_text"].format(product=product_name, scene=scene, points=selling_points, rules=campaign_rules),
                     "facebook_headline": angle["facebook_headline"].format(product=product_name),
                     "facebook_description": angle["facebook_description"].format(product=product_name, points=selling_points),
-                    "compliance_notes": "只表达真实产品事实和页面活动规则；不承诺收益、不暗示无风险。",
+                    "compliance_notes": f"只表达真实产品事实和页面活动规则；不承诺收益、不暗示无风险。活动规则仅供合规参考：{campaign_rules}",
                 }
             )
         return concepts
+
+    def _runway_language_instruction(self, language):
+        return f"The voiceover, captions, on-screen text should be {self._language_label(language)}."
+
+    def _language_label(self, language):
+        return {
+            "pt-BR": "Brazilian Portuguese",
+            "es": "Spanish",
+            "en": "English",
+            "zh": "Chinese",
+        }[language]
 
     def _localized_concept_angles(self, language):
         if language == "pt-BR":
             return [
                 {
                     "name": "Comece conferindo as regras",
-                    "target_angle": "Novo usuário que precisa entender a oferta antes de agir",
+                    "target_angle": "Público: {audience}; novo usuário que precisa entender a oferta antes de agir",
                     "hook": "Confira {product} antes de participar.",
                     "scene_breakdown": "Celular em {scene}; interface real; destaque de {points}; tela final com regras.",
-                    "script": "Abra com uma dúvida comum em {scene}. Mostre a interface real de {product}, explique {points} e finalize lembrando: {rules}.",
+                    "script": "Abra com uma dúvida comum em {scene}. Mostre a interface real de {product}, explique {points} e finalize com um convite para conferir os detalhes.",
                     "voiceover": "Confira {product} com calma, veja a interface real e leia as regras antes de começar.",
                     "captions": ["Confira as regras reais", "{product}: {points}", "Comece pelos detalhes"],
                     "visual_style": "Vertical, mobile-first, clean UI close-ups",
@@ -402,7 +421,7 @@ class MockAIProvider:
                 },
                 {
                     "name": "Interface real em 15 segundos",
-                    "target_angle": "Usuário cauteloso que quer ver como funciona",
+                    "target_angle": "Público: {audience}; usuário cauteloso que quer ver como funciona",
                     "hook": "Veja como {product} funciona no celular.",
                     "scene_breakdown": "Abertura com mão usando celular; zoom em interface; benefícios; CTA.",
                     "script": "Mostre a tela real, explique {points} em uma frase e conduza para conferir as regras completas.",
@@ -417,7 +436,7 @@ class MockAIProvider:
                 },
                 {
                     "name": "Primeiro passo simples",
-                    "target_angle": "Usuário pronto para testar uma jornada curta",
+                    "target_angle": "Público: {audience}; usuário pronto para testar uma jornada curta",
                     "hook": "O primeiro passo em {product} pode ser simples.",
                     "scene_breakdown": "Problema rápido; tela do produto; regra da campanha; CTA.",
                     "script": "Mostre a situação, apresente {product}, destaque {points} e finalize com um CTA para conferir detalhes.",
@@ -432,12 +451,12 @@ class MockAIProvider:
                 },
                 {
                     "name": "Regras transparentes",
-                    "target_angle": "Usuário sensível a condições de campanha",
+                    "target_angle": "Público: {audience}; usuário sensível a condições de campanha",
                     "hook": "Antes de participar, veja as regras.",
                     "scene_breakdown": "Tela de regras; interface; benefício; CTA para página.",
-                    "script": "Apresente {rules}, conecte com {points} e mantenha a decisão nas mãos do usuário.",
+                    "script": "Comece com transparência, conecte {points} ao uso real e mantenha a decisão nas mãos do usuário.",
                     "voiceover": "As regras vêm primeiro. Confira os detalhes e veja se {product} faz sentido para você.",
-                    "captions": ["Regras primeiro", "{rules}", "Decida com clareza"],
+                    "captions": ["Transparência primeiro", "Confira os detalhes", "Decida com clareza"],
                     "visual_style": "Transparent rule cards over real UI",
                     "runway_prompt": "Brazilian Portuguese transparent offer ad, rule cards, real UI, clear captions, trustworthy tone.",
                     "elevenlabs_prompt": "Brazilian Portuguese calm explanatory voice.",
@@ -447,7 +466,7 @@ class MockAIProvider:
                 },
                 {
                     "name": "Comparação de rotina",
-                    "target_angle": "Usuário que decide no contexto do dia a dia",
+                    "target_angle": "Público: {audience}; usuário que decide no contexto do dia a dia",
                     "hook": "Em {scene}, uma interface clara ajuda.",
                     "scene_breakdown": "Rotina diária; celular; produto; resumo dos pontos; CTA.",
                     "script": "Use {scene} como contexto, mostre {product} e resuma {points} sem prometer resultado.",
@@ -465,10 +484,10 @@ class MockAIProvider:
             return [
                 {
                     "name": "Consulta las reglas primero",
-                    "target_angle": "Usuario nuevo que necesita entender la oferta",
+                    "target_angle": "Audiencia: {audience}; usuario nuevo que necesita entender la oferta",
                     "hook": "Consulta {product} antes de participar.",
                     "scene_breakdown": "Uso móvil en {scene}; interfaz real; {points}; cierre con reglas.",
-                    "script": "Abre con una duda del usuario, muestra {product}, explica {points} y recuerda revisar: {rules}.",
+                    "script": "Abre con una duda del usuario, muestra {product}, explica {points} y cierra invitando a revisar los detalles.",
                     "voiceover": "Consulta {product}, revisa la interfaz real y lee las reglas antes de comenzar.",
                     "captions": ["Consulta las reglas reales", "{product}: {points}", "Comienza por los detalles"],
                     "visual_style": "Vertical, interfaz clara, ritmo directo",
@@ -480,7 +499,7 @@ class MockAIProvider:
                 },
                 {
                     "name": "Interfaz real",
-                    "target_angle": "Usuario cauteloso que quiere ver el flujo",
+                    "target_angle": "Audiencia: {audience}; usuario cauteloso que quiere ver el flujo",
                     "hook": "Mira cómo funciona {product} en el móvil.",
                     "scene_breakdown": "Mano con móvil; interfaz; beneficio; CTA.",
                     "script": "Muestra la pantalla real, resume {points} y guía al usuario a revisar las reglas completas.",
@@ -495,7 +514,7 @@ class MockAIProvider:
                 },
                 {
                     "name": "Primer paso simple",
-                    "target_angle": "Usuario que necesita una acción clara",
+                    "target_angle": "Audiencia: {audience}; usuario que necesita una acción clara",
                     "hook": "El primer paso en {product} puede ser simple.",
                     "scene_breakdown": "Problema rápido; producto; regla; CTA.",
                     "script": "Presenta la situación, muestra {product}, destaca {points} y cierra con revisar detalles.",
@@ -510,12 +529,12 @@ class MockAIProvider:
                 },
                 {
                     "name": "Reglas transparentes",
-                    "target_angle": "Usuario sensible a condiciones",
+                    "target_angle": "Audiencia: {audience}; usuario sensible a condiciones",
                     "hook": "Antes de participar, revisa las reglas.",
                     "scene_breakdown": "Tarjetas de reglas; interfaz; beneficio; CTA.",
-                    "script": "Presenta {rules}, conecta con {points} y deja clara la decisión del usuario.",
+                    "script": "Presenta el contexto con transparencia, conecta con {points} y deja clara la decisión del usuario.",
                     "voiceover": "Las reglas van primero. Consulta los detalles y decide si {product} encaja contigo.",
-                    "captions": ["Reglas primero", "{rules}", "Decide con claridad"],
+                    "captions": ["Transparencia primero", "Revisa los detalles", "Decide con claridad"],
                     "visual_style": "Rule cards sobre UI real",
                     "runway_prompt": "Spanish transparent offer ad, rule cards, real UI, clear captions.",
                     "elevenlabs_prompt": "Spanish calm explanatory voice.",
@@ -525,7 +544,7 @@ class MockAIProvider:
                 },
                 {
                     "name": "Rutina diaria",
-                    "target_angle": "Usuario que decide por contexto cotidiano",
+                    "target_angle": "Audiencia: {audience}; usuario que decide por contexto cotidiano",
                     "hook": "En {scene}, una interfaz clara ayuda.",
                     "scene_breakdown": "Rutina; móvil; producto; puntos clave; CTA.",
                     "script": "Usa {scene} como contexto, muestra {product} y resume {points} sin prometer resultados.",
@@ -543,10 +562,10 @@ class MockAIProvider:
             return [
                 {
                     "name": "Check the rules first",
-                    "target_angle": "New user who needs clarity before taking action",
+                    "target_angle": "Audience: {audience}; new user who needs clarity before taking action",
                     "hook": "Check {product} before you join.",
                     "scene_breakdown": "Mobile use in {scene}; real interface; {points}; rules screen.",
-                    "script": "Open with a user question, show {product}, explain {points}, then point to the real terms: {rules}.",
+                    "script": "Open with a user question, show {product}, explain {points}, then invite viewers to check the details.",
                     "voiceover": "Check {product}, review the real interface, and read the rules before you get started.",
                     "captions": ["Check the real rules", "{product}: {points}", "Get started with the details"],
                     "visual_style": "Vertical mobile-first ad with clean UI close-ups",
@@ -558,7 +577,7 @@ class MockAIProvider:
                 },
                 {
                     "name": "Real interface walkthrough",
-                    "target_angle": "Cautious user who wants to see the flow",
+                    "target_angle": "Audience: {audience}; cautious user who wants to see the flow",
                     "hook": "See how {product} works on mobile.",
                     "scene_breakdown": "Hand with phone; UI close-up; benefit; CTA.",
                     "script": "Show the real screen, summarize {points}, and guide users to review complete terms.",
@@ -573,7 +592,7 @@ class MockAIProvider:
                 },
                 {
                     "name": "Simple first step",
-                    "target_angle": "User who needs one clear action",
+                    "target_angle": "Audience: {audience}; user who needs one clear action",
                     "hook": "Your first step with {product} can be simple.",
                     "scene_breakdown": "Quick problem; product screen; campaign rule; CTA.",
                     "script": "Show the situation, introduce {product}, highlight {points}, and close with a detail-check CTA.",
@@ -588,12 +607,12 @@ class MockAIProvider:
                 },
                 {
                     "name": "Transparent terms",
-                    "target_angle": "User sensitive to campaign conditions",
+                    "target_angle": "Audience: {audience}; user sensitive to campaign conditions",
                     "hook": "Before joining, review the rules.",
                     "scene_breakdown": "Rule cards; interface; benefit; landing page CTA.",
-                    "script": "Present {rules}, connect it to {points}, and keep the user's decision informed.",
+                    "script": "Start with transparency, connect it to {points}, and keep the user's decision informed.",
                     "voiceover": "Rules come first. Check the details and decide whether {product} fits your use case.",
-                    "captions": ["Rules first", "{rules}", "Decide clearly"],
+                    "captions": ["Transparency first", "Check the details", "Decide clearly"],
                     "visual_style": "Transparent rule cards over real UI",
                     "runway_prompt": "English transparent offer ad, rule cards, real UI, clear captions, trustworthy tone.",
                     "elevenlabs_prompt": "English calm explanatory voice.",
@@ -603,7 +622,7 @@ class MockAIProvider:
                 },
                 {
                     "name": "Daily routine context",
-                    "target_angle": "User deciding in an everyday mobile context",
+                    "target_angle": "Audience: {audience}; user deciding in an everyday mobile context",
                     "hook": "In {scene}, a clear interface helps.",
                     "scene_breakdown": "Daily routine; phone; product; key points; CTA.",
                     "script": "Use {scene} as context, show {product}, and summarize {points} without promising outcomes.",
@@ -620,10 +639,10 @@ class MockAIProvider:
         return [
             {
                 "name": "先看规则再行动",
-                "target_angle": "需要先理解活动边界的新用户",
+                "target_angle": "受众：{audience}；需要先理解活动边界的新用户",
                 "hook": "先看清{product}的真实规则。",
                 "scene_breakdown": "{scene}打开手机；真实界面；{points}；活动规则收尾。",
-                "script": "用用户疑问开场，展示{product}真实界面，说明{points}，最后提醒查看：{rules}。",
+                "script": "用用户疑问开场，展示{product}真实界面，说明{points}，最后提醒查看详情。",
                 "voiceover": "先看{product}的真实界面和活动规则，再决定是否开始。",
                 "captions": ["先看真实规则", "{product}：{points}", "现在查看详情"],
                 "visual_style": "竖屏、移动端、真实界面特写",
@@ -635,7 +654,7 @@ class MockAIProvider:
             },
             {
                 "name": "真实界面演示",
-                "target_angle": "重视操作路径的谨慎用户",
+                "target_angle": "受众：{audience}；重视操作路径的谨慎用户",
                 "hook": "{product}在手机上可以这样看。",
                 "scene_breakdown": "手持手机；界面演示；卖点说明；CTA。",
                 "script": "展示真实屏幕，用一句话说明{points}，引导用户查看完整规则。",
@@ -650,7 +669,7 @@ class MockAIProvider:
             },
             {
                 "name": "简单第一步",
-                "target_angle": "需要明确行动指引的用户",
+                "target_angle": "受众：{audience}；需要明确行动指引的用户",
                 "hook": "{product}的第一步可以很清楚。",
                 "scene_breakdown": "痛点；产品界面；规则；CTA。",
                 "script": "先给出场景，再展示{product}，突出{points}，最后提示查看详情。",
@@ -665,12 +684,12 @@ class MockAIProvider:
             },
             {
                 "name": "规则透明",
-                "target_angle": "重视活动条件的用户",
+                "target_angle": "受众：{audience}；重视活动条件的用户",
                 "hook": "参与前，先确认规则。",
                 "scene_breakdown": "规则卡片；真实界面；卖点；落地页CTA。",
-                "script": "展示{rules}，再连接{points}，让用户基于信息做决定。",
+                "script": "先展示透明信息，再连接{points}，让用户基于信息做决定。",
                 "voiceover": "规则先讲清楚。看看{product}是否符合你的使用场景。",
-                "captions": ["规则优先", "{rules}", "清楚再决定"],
+                "captions": ["透明信息优先", "先查看详情", "清楚再决定"],
                 "visual_style": "规则卡片叠加真实界面",
                 "runway_prompt": "中文透明活动规则广告，真实UI，字幕清晰，可信语气。",
                 "elevenlabs_prompt": "中文解释型口播，平稳可信。",
@@ -680,7 +699,7 @@ class MockAIProvider:
             },
             {
                 "name": "日常场景切入",
-                "target_angle": "在移动端日常场景中决策的用户",
+                "target_angle": "受众：{audience}；在移动端日常场景中决策的用户",
                 "hook": "{scene}，清楚的界面更重要。",
                 "scene_breakdown": "日常场景；手机；产品；卖点；CTA。",
                 "script": "以{scene}切入，展示{product}并说明{points}，不承诺任何结果。",
