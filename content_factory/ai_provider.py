@@ -1,4 +1,11 @@
+import json
+import re
+
 from content_factory.models import EVALUATION_WEIGHTS
+
+
+class ProviderResponseError(ValueError):
+    """Raised when an LLM provider returns unreadable or incomplete JSON."""
 
 
 class MockAIProvider:
@@ -356,3 +363,173 @@ class MockAIProvider:
             "en": "Structure: pain point first, facts next, action at the end.",
             "zh": "参考爆款结构：先痛点、再事实、后行动。",
         }[language]
+
+
+class OpenAIProvider(MockAIProvider):
+    """OpenAI-backed provider with the same public methods as MockAIProvider."""
+
+    DEFAULT_MODEL = "gpt-4.1-mini"
+
+    def __init__(self, api_key, model=None, client=None):
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY is required when CONTENT_FACTORY_PROVIDER=openai")
+        self.api_key = api_key
+        self.model = model or self.DEFAULT_MODEL
+        self.client = client or self._build_client(api_key)
+
+    def structure_demand(self, raw_input, product_context):
+        payload = {
+            "raw_input": raw_input,
+            "product_context": product_context,
+            "required_schema": {
+                "平台": "string",
+                "国家": "string",
+                "人群": "string",
+                "场景": "string",
+                "目标": "string",
+                "时长": "string",
+                "输出物": "array",
+                "缺失信息": "array",
+            },
+        }
+        result = self._request_json(
+            "你是海外投流素材需求结构化助手。只返回 JSON，不要 Markdown。",
+            payload,
+        )
+        return self._require_keys(result, ("平台", "国家", "人群", "场景", "目标", "时长", "输出物", "缺失信息"), "结构化需求")
+
+    def deconstruct_benchmark(self, benchmark_input, product_context):
+        payload = {
+            "benchmark_input": benchmark_input,
+            "product_context": product_context,
+            "required_fields": ["开头钩子", "脚本节奏", "镜头结构", "情绪路径", "卖点表达", "CTA", "可复用结构", "来源摘要"],
+        }
+        result = self._request_json(
+            "你是广告 benchmark 拆解助手。只返回结构化 JSON，不要 Markdown。",
+            payload,
+        )
+        return self._require_keys(result, ("开头钩子", "脚本节奏", "镜头结构", "情绪路径", "卖点表达", "CTA", "可复用结构", "来源摘要"), "Benchmark 拆解")
+
+    def generate_content(self, product, demand, materials, benchmarks, audit):
+        if audit.get("status") in ("HUMAN_REQUIRED", "FATAL_FAILED"):
+            return {"status": "BLOCKED", "阻断原因": audit.get("risks") or audit.get("missing_materials", [])}
+        language = demand.get("structured", {}).get("语言", "zh")
+        payload = {
+            "language": language,
+            "language_instruction": self._language_instruction(language),
+            "product": product,
+            "demand": demand,
+            "materials": materials,
+            "benchmarks": benchmarks,
+            "audit": audit,
+            "required_fields": [
+                "素材方向",
+                "脚本",
+                "旁白",
+                "字幕",
+                "分镜",
+                "Runway Prompt",
+                "HeyGen Prompt",
+                "ElevenLabs Prompt",
+                "Facebook广告文案",
+                "TikTok广告文案",
+                "合规提醒",
+            ],
+            "script_required_fields": ["10秒脚本", "15秒脚本", "30秒脚本"],
+        }
+        result = self._request_json(
+            "你是海外广告素材生成助手。输出必须是 JSON。字段名可用中文；正式素材内容必须按 language 输出；后台合规提醒可以中文。",
+            payload,
+        )
+        self._require_keys(
+            result,
+            ("素材方向", "脚本", "旁白", "字幕", "分镜", "Runway Prompt", "HeyGen Prompt", "ElevenLabs Prompt", "Facebook广告文案", "TikTok广告文案", "合规提醒"),
+            "素材内容",
+        )
+        self._require_keys(result["脚本"], ("10秒脚本", "15秒脚本", "30秒脚本"), "脚本")
+        return result
+
+    def evaluate_generation(self, product, demand, generation, audit):
+        payload = {
+            "product": product,
+            "demand": demand,
+            "generation": generation,
+            "audit": audit,
+            "weights": EVALUATION_WEIGHTS,
+            "required_fields": ["总分", "维度得分", "修改建议", "失败原因", "下一步动作"],
+        }
+        result = self._request_json(
+            "你是素材质量评分助手。请返回 100 分制评分 JSON，总分必须是整数。",
+            payload,
+        )
+        return self._require_keys(result, ("总分", "维度得分", "修改建议", "失败原因", "下一步动作"), "100分评分报告")
+
+    def analyze_performance(self, generation, performance_log):
+        payload = {
+            "generation": generation,
+            "performance_log": performance_log,
+            "required_fields": ["表现判断", "关键指标", "可能问题", "下一轮动作", "建议"],
+        }
+        result = self._request_json(
+            "你是投放分析助手。请基于指标返回中文 JSON 投放分析建议。",
+            payload,
+        )
+        return self._require_keys(result, ("表现判断", "关键指标", "可能问题", "下一轮动作", "建议"), "投放分析建议")
+
+    def _build_client(self, api_key):
+        try:
+            from openai import OpenAI
+        except ImportError as exc:
+            raise RuntimeError("OpenAI provider requires the openai Python package to be installed.") from exc
+        return OpenAI(api_key=api_key)
+
+    def _request_json(self, instruction, payload):
+        prompt = f"{instruction}\n\n输入 JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}"
+        response = self.client.responses.create(
+            model=self.model,
+            input=prompt,
+            response_format={"type": "json_object"},
+        )
+        text = self._response_text(response)
+        return self._parse_json(text)
+
+    def _response_text(self, response):
+        if isinstance(response, str):
+            return response
+        output_text = getattr(response, "output_text", None)
+        if output_text:
+            return output_text
+        try:
+            return response.output[0].content[0].text
+        except (AttributeError, IndexError, TypeError) as exc:
+            raise ProviderResponseError("OpenAI response did not contain readable JSON text.") from exc
+
+    def _parse_json(self, text):
+        candidate = (text or "").strip()
+        fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", candidate, re.DOTALL)
+        if fenced:
+            candidate = fenced.group(1).strip()
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError as exc:
+            raise ProviderResponseError(f"OpenAI provider returned invalid JSON: {exc.msg}") from exc
+        if not isinstance(parsed, dict):
+            raise ProviderResponseError("OpenAI provider returned JSON, but the top-level value was not an object.")
+        return parsed
+
+    def _require_keys(self, value, keys, label):
+        if not isinstance(value, dict):
+            raise ProviderResponseError(f"{label} must be a JSON object.")
+        missing = [key for key in keys if key not in value]
+        if missing:
+            raise ProviderResponseError(f"{label} JSON missing required fields: {', '.join(missing)}")
+        return value
+
+    def _language_instruction(self, language):
+        normalized = self._normalize_language(language)
+        return {
+            "pt-BR": "正式广告脚本、字幕、旁白、广告文案、视频 Prompt 必须使用巴西葡萄牙语。",
+            "es": "正式广告脚本、字幕、旁白、广告文案、视频 Prompt 必须使用西班牙语。",
+            "en": "正式广告脚本、字幕、旁白、广告文案、视频 Prompt 必须使用英语。",
+            "zh": "正式广告脚本、字幕、旁白、广告文案、视频 Prompt 必须使用中文。",
+        }[normalized]

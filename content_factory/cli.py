@@ -1,9 +1,9 @@
 import argparse
 import json
 
-from content_factory.ai_provider import MockAIProvider
 from content_factory.config import load_settings
 from content_factory.db import connect, init_db
+from content_factory.provider_factory import create_provider
 from content_factory.services import (
     get_generation_result,
     record_performance_feedback,
@@ -19,7 +19,7 @@ def main(argv=None):
 
     conn = connect(database_path)
     init_db(conn)
-    provider = MockAIProvider()
+    provider = create_provider()
 
     request = _request_from_args(args)
     pipeline_result = run_content_pipeline(conn, provider, request)
