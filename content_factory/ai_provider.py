@@ -265,6 +265,12 @@ class MockAIProvider:
                 "en": "mobile browsing",
                 "zh": scene,
             }[language]
+        if language != "zh" and self._contains_chinese(scene):
+            return {
+                "pt-BR": "uso no celular",
+                "es": "uso móvil",
+                "en": "mobile browsing",
+            }[language]
         return scene
 
     def _localized_goal(self, language, goal):
@@ -275,10 +281,33 @@ class MockAIProvider:
                 "en": "signup",
                 "zh": goal,
             }[language]
+        if language != "zh" and self._contains_chinese(goal):
+            return {
+                "pt-BR": "cadastro",
+                "es": "registro",
+                "en": "signup",
+            }[language]
         return goal
 
     def _localized_points(self, language, points):
         normalized = (points or "").strip().lower()
+        if any(
+            token in normalized
+            for token in (
+                "ai copy trading",
+                "crypto and us stocks trading",
+                "crypto trading",
+                "us stocks trading",
+                "fast onboarding",
+                "beginner-friendly trading experience",
+            )
+        ):
+            return {
+                "pt-BR": "copy trading com IA, negociação de criptomoedas, negociação de ações dos EUA, cadastro rápido e experiência simples para iniciantes",
+                "es": "copy trading con IA, negociación de criptomonedas, negociación de acciones de EE. UU., registro rápido y experiencia sencilla para principiantes",
+                "en": "AI copy trading, crypto trading, US stocks trading, fast onboarding, and a beginner-friendly trading experience",
+                "zh": "AI 跟单交易、加密货币交易、美股交易、快速开户和适合新手的交易体验",
+            }[language]
         if any(token in normalized for token in ("fast deposits", "clean interface", "new user campaign", "signup reward", "copy trading", "quick start")):
             return {
                 "pt-BR": "depósitos rápidos, interface clara e campanha para novos usuários",
@@ -300,7 +329,16 @@ class MockAIProvider:
                 "en": "real product benefits",
                 "zh": points,
             }[language]
+        if language != "zh" and self._contains_chinese(points):
+            return {
+                "pt-BR": "benefícios reais do produto, interface clara e início simples",
+                "es": "beneficios reales del producto, interfaz clara e inicio sencillo",
+                "en": "real product benefits, a clear interface, and a simple start",
+            }[language]
         return points
+
+    def _contains_chinese(self, value):
+        return bool(re.search(r"[一-鿿]", value or ""))
 
     def _localized_rules(self, language, rules):
         if "新人" in rules or "注册" in rules or "落地页" in rules:

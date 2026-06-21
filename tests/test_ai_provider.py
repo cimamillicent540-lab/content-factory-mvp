@@ -29,6 +29,35 @@ class MockAIProviderTests(unittest.TestCase):
             },
         }
 
+
+    def _official_concept_text(self, concept):
+        official_fields = [
+            "concept_name",
+            "target_angle",
+            "hook",
+            "scene_breakdown",
+            "15s_script",
+            "voiceover",
+            "visual_style",
+            "runway_prompt",
+            "elevenlabs_prompt",
+            "facebook_primary_text",
+            "facebook_headline",
+            "facebook_description",
+        ]
+        parts = []
+        for field in official_fields:
+            value = concept[field]
+            if isinstance(value, list):
+                parts.extend(value)
+            else:
+                parts.append(value)
+        parts.extend(concept["captions"])
+        return " ".join(parts)
+
+    def _assert_no_chinese_characters(self, text):
+        self.assertNotRegex(text, r"[一-鿿]")
+
     def test_structure_demand_returns_chinese_fields(self):
         result = self.provider.structure_demand("给TikTok巴西用户做15秒注册广告", self.product)
         self.assertEqual(result["平台"], "TikTok")
@@ -147,6 +176,68 @@ class MockAIProviderTests(unittest.TestCase):
         self.assertIn("Brazilian first-time crypto users aged 25-40", concept["target_angle"])
         self.assertNotIn("fast deposits, clean interface, new user campaign", official_text)
         self.assertIn("depósitos rápidos", official_text)
+
+    def test_generate_content_localizes_spikex_points_for_pt_br_without_chinese_copy(self):
+        product = dict(
+            self.product,
+            name="Spikex",
+            selling_points="AI copy trading, crypto and US stocks trading, fast onboarding, beginner-friendly trading experience",
+        )
+        demand = {
+            "raw_input": "Facebook Brazil 15s",
+            "structured": {
+                "语言": "Brazilian Portuguese",
+                "人群": "Brazilian retail traders interested in crypto, stocks, copy trading and AI trading tools",
+                "场景": "mobile browsing",
+                "目标": "signup",
+            },
+        }
+
+        result = self.provider.generate_content(product, demand, [], [], {"status": "PASS"})
+        all_official_text = " ".join(self._official_concept_text(concept) for concept in result["video_ad_concepts"])
+
+        self._assert_no_chinese_characters(all_official_text)
+        self.assertIn("copy trading com IA", all_official_text)
+        self.assertIn("criptomoedas", all_official_text)
+        self.assertIn("ações dos EUA", all_official_text)
+        self.assertIn("cadastro rápido", all_official_text)
+        self.assertIn("experiência simples para iniciantes", all_official_text)
+
+    def test_non_chinese_official_mock_fields_do_not_contain_chinese_characters(self):
+        cases = {
+            "pt-BR": "copy trading com IA",
+            "es": "copy trading con IA",
+            "en": "AI copy trading",
+        }
+        for language, expected_phrase in cases.items():
+            with self.subTest(language=language):
+                product = dict(
+                    self.product,
+                    name="Spikex",
+                    selling_points="AI copy trading, crypto and US stocks trading, fast onboarding, beginner-friendly trading experience",
+                )
+                demand = {
+                    "raw_input": "Facebook Brazil 15s",
+                    "structured": {
+                        "语言": language,
+                        "人群": "Brazilian retail traders interested in crypto",
+                        "场景": "移动端浏览场景",
+                        "目标": "注册转化",
+                    },
+                }
+
+                result = self.provider.generate_content(product, demand, [], [], {"status": "PASS"})
+                official_text = " ".join(self._official_concept_text(concept) for concept in result["video_ad_concepts"])
+
+                self._assert_no_chinese_characters(official_text)
+                self.assertIn(expected_phrase, official_text)
+                self.assertRegex(result["video_ad_concepts"][0]["compliance_notes"], r"[一-鿿]")
+
+    def test_chinese_official_mock_fields_can_contain_chinese_characters(self):
+        result = self.provider.generate_content(self.product, self.demand, [], [], {"status": "PASS"})
+        official_text = self._official_concept_text(result["video_ad_concepts"][0])
+
+        self.assertRegex(official_text, r"[一-鿿]")
 
     def test_campaign_rules_stay_out_of_official_ad_content(self):
         product = dict(
