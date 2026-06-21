@@ -217,6 +217,7 @@ def _homepage_html():
     }
     textarea { min-height: 84px; resize: vertical; }
     .wide { grid-column: 1 / -1; }
+    .demo-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0 12px; }
     button {
       width: max-content;
       border-color: var(--blue);
@@ -272,6 +273,11 @@ def _homepage_html():
     <h1>Content Factory MVP</h1>
     <p>Overseas Ad Creative Generator</p>
     <p hidden>海外投流素材内容工厂</p>
+    <div class="demo-actions">
+      <button type="button" onclick="fillDemo('spikex')">Spikex Brazil Demo</button>
+      <button type="button" onclick="fillDemo('blocked')">BLOCKED Risk Demo</button>
+      <button type="button" onclick="clearForm()">Clear Form</button>
+    </div>
     <form id="factory-form">
       <label>行业 industry
         <input name="industry" value="crypto exchange" required>
@@ -324,6 +330,53 @@ def _homepage_html():
     const field = (label, value) => `<div class="field"><b>${escapeHtml(label)}</b><div>${escapeHtml(value || '')}</div></div>`;
     const list = (items) => Array.isArray(items) ? `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>` : `<p>${escapeHtml(items || '')}</p>`;
     const copyBox = (value) => `<textarea class="copy-box" readonly>${escapeHtml(value || '')}</textarea>`;
+    const demos = {
+      spikex: {
+        industry: 'crypto exchange',
+        product: 'Spikex',
+        platform: 'Facebook Ads',
+        country: 'Brazil',
+        language: 'Brazilian Portuguese',
+        audience: 'Brazilian retail traders interested in crypto, stocks, copy trading and AI trading tools',
+        selling_points: 'AI copy trading, crypto trading, US stocks trading, fast onboarding, beginner-friendly trading experience',
+        duration: '15',
+        campaign_rules: 'Avoid unrealistic financial promises, avoid exaggerated claims, follow platform ad policy, include risk-aware language',
+        forbidden_claims: 'guaranteed profit, risk-free, no loss',
+        restrictions: 'guaranteed profit, risk-free, no loss',
+        demand: 'Generate 5 short video ad concepts with hooks, scripts, voiceover, captions and Runway prompts'
+      },
+      blocked: {
+        industry: 'crypto exchange',
+        product: 'Spikex',
+        platform: 'Facebook Ads',
+        country: 'Brazil',
+        language: 'Brazilian Portuguese',
+        audience: 'Brazilian retail traders interested in crypto',
+        selling_points: 'guaranteed profit, risk-free trading, no loss',
+        duration: '15',
+        campaign_rules: 'Follow platform ad policy',
+        forbidden_claims: 'none',
+        restrictions: 'none',
+        demand: 'Generate short video ad concepts'
+      }
+    };
+
+    function fillDemo(name) {
+      Object.entries(demos[name]).forEach(([key, value]) => {
+        if (form[key]) form[key].value = value;
+      });
+      statusBox.className = 'status';
+      statusBox.textContent = '等待生成';
+    }
+
+    function clearForm() {
+      Array.from(form.elements).forEach((element) => {
+        if (element.name) element.value = '';
+      });
+      statusBox.className = 'status';
+      statusBox.textContent = '等待生成';
+      output.textContent = '生成结果会显示在这里。';
+    }
 
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -421,11 +474,9 @@ def _homepage_html():
 
     function renderFacebookBlock(concept) {
       return `<article class="creative-card"><header><h3>${escapeHtml(concept.concept_id)} Facebook Ads</h3></header>
-        <div class="grid">
-          ${field('Primary Text', concept.facebook_primary_text)}
-          ${field('Headline', concept.facebook_headline)}
-          ${field('Description', concept.facebook_description)}
-        </div>
+        <b>Primary Text</b>${copyBox(concept.facebook_primary_text)}
+        <b>Headline</b>${copyBox(concept.facebook_headline)}
+        <b>Description</b>${copyBox(concept.facebook_description)}
       </article>`;
     }
 

@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from pathlib import Path
 
 from content_factory.api import create_app
 
@@ -38,6 +39,17 @@ class WebUiTests(unittest.TestCase):
         self.assertIn('name="forbidden_claims" value="guaranteed profit, risk-free, no loss"', body)
         self.assertIn("Generate 5 short video ad concepts with hooks, scripts, voiceover, captions and Runway prompts", body)
 
+    def test_homepage_includes_demo_fill_buttons(self):
+        _status, _headers, body = self.app.handle("GET", "/")
+
+        self.assertIn("Spikex Brazil Demo", body)
+        self.assertIn("BLOCKED Risk Demo", body)
+        self.assertIn("Clear Form", body)
+        self.assertIn("fillDemo('spikex')", body)
+        self.assertIn("fillDemo('blocked')", body)
+        self.assertIn("clearForm()", body)
+        self.assertIn("guaranteed profit, risk-free trading, no loss", body)
+
     def test_homepage_calls_existing_generate_api(self):
         _status, _headers, body = self.app.handle("GET", "/")
 
@@ -65,6 +77,9 @@ class WebUiTests(unittest.TestCase):
         self.assertIn("facebook_primary_text", body)
         self.assertIn("facebook_headline", body)
         self.assertIn("facebook_description", body)
+        self.assertIn("copyBox(concept.facebook_primary_text)", body)
+        self.assertIn("copyBox(concept.facebook_headline)", body)
+        self.assertIn("copyBox(concept.facebook_description)", body)
         self.assertNotIn("field('compliance_notes'", body)
         self.assertIn("scoring_report", body)
         self.assertIn("launch_plan", body)
@@ -78,3 +93,11 @@ class WebUiTests(unittest.TestCase):
         self.assertIn("阻断原因", body)
         self.assertIn("替代表达建议", body)
         self.assertIn("BLOCKED 状态不展示素材卡片", body)
+
+    def test_readme_documents_local_web_demo(self):
+        readme = Path("README.md").read_text()
+
+        self.assertIn("CONTENT_FACTORY_PROVIDER=mock python3 -m content_factory.api --host 127.0.0.1 --port 8000", readme)
+        self.assertIn("http://127.0.0.1:8000", readme)
+        self.assertIn("CONTENT_FACTORY_PROVIDER=mock python3 -m unittest discover -v", readme)
+        self.assertIn("python3 -m compileall content_factory tests", readme)
