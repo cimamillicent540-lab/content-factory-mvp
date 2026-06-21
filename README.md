@@ -182,6 +182,37 @@ http://127.0.0.1:8000/
 
 点击生成后，页面会调用 `POST /generate`，展示中文字段名的结构化 JSON；其中 `素材内容` 会按 `language` 输出对应语言。
 
+## 本地 Web Demo
+
+进入项目目录：
+
+```bash
+cd /Users/zeipiaoliang/Documents/content-factory-mvp
+```
+
+使用 mock 模式启动本地 Web Demo：
+
+```bash
+unset OPENAI_API_KEY
+unset OPENAI_MODEL
+CONTENT_FACTORY_PROVIDER=mock python3 -m content_factory.api --host 127.0.0.1 --port 8000
+```
+
+本地访问地址：
+
+```text
+http://127.0.0.1:8000/
+```
+
+运行测试：
+
+```bash
+unset OPENAI_API_KEY
+unset OPENAI_MODEL
+CONTENT_FACTORY_PROVIDER=mock python3 -m unittest discover -v
+python3 -m compileall content_factory tests
+```
+
 ## 本地数据
 
 默认配置来自环境变量或内置默认值：
