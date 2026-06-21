@@ -274,40 +274,40 @@ def _homepage_html():
     <p hidden>海外投流素材内容工厂</p>
     <form id="factory-form">
       <label>行业 industry
-        <input name="industry" value="交易所" required>
+        <input name="industry" value="crypto exchange" required>
       </label>
       <label>产品 product
-        <input name="product" value="加密货币跟单产品" required>
+        <input name="product" value="Spikex" required>
       </label>
       <label>平台 platform
-        <input name="platform" value="Facebook" required>
+        <input name="platform" value="Facebook Ads" required>
       </label>
       <label>国家 country
-        <input name="country" value="巴西" required>
+        <input name="country" value="Brazil" required>
       </label>
       <label>语言 language
-        <input name="language" value="中文" required>
+        <input name="language" value="Brazilian Portuguese" required>
       </label>
       <label>人群 audience
-        <input name="audience" value="新用户" required>
+        <input name="audience" value="Brazilian retail traders interested in crypto, stocks, copy trading and AI trading tools" required>
       </label>
       <label class="wide">卖点 selling_points
-        <input name="selling_points" value="注册奖励、跟单、快速开始" required>
+        <input name="selling_points" value="AI copy trading, crypto trading, US stocks trading, fast onboarding, beginner-friendly trading experience" required>
       </label>
       <label>时长 duration
-        <input name="duration" value="15秒" required>
+        <input name="duration" value="15" required>
       </label>
       <label>活动规则 campaign_rules
-        <input name="campaign_rules" value="新人完成注册可参与活动">
+        <input name="campaign_rules" value="Avoid unrealistic financial promises, avoid exaggerated claims, follow platform ad policy, include risk-aware language">
       </label>
       <label>禁用表达 forbidden_claims
-        <input name="forbidden_claims" value="稳赚，保证收益，官方背书">
+        <input name="forbidden_claims" value="guaranteed profit, risk-free, no loss">
       </label>
       <label>限制词/红线词 restrictions
-        <input name="restrictions" value="稳赚，保证收益，官方背书" required>
+        <input name="restrictions" value="guaranteed profit, risk-free, no loss" required>
       </label>
       <label class="wide">自定义需求 demand
-        <textarea name="demand" placeholder="留空则根据字段自动生成需求"></textarea>
+        <textarea name="demand" placeholder="留空则根据字段自动生成需求">Generate 5 short video ad concepts with hooks, scripts, voiceover, captions and Runway prompts</textarea>
       </label>
       <div class="wide">
         <button type="submit">生成素材卡片</button>
@@ -408,7 +408,6 @@ def _homepage_html():
           ${field('facebook_primary_text', concept.facebook_primary_text)}
           ${field('facebook_headline', concept.facebook_headline)}
           ${field('facebook_description', concept.facebook_description)}
-          ${field('compliance_notes', concept.compliance_notes)}
         </div>
       </article>`;
     }
