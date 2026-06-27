@@ -182,6 +182,18 @@ http://127.0.0.1:8000/
 
 点击生成后，页面会调用 `POST /generate`，展示中文字段名的结构化 JSON；其中 `素材内容` 会按 `language` 输出对应语言。
 
+## Creative Brief Export
+
+当 Web UI 返回 `GENERATED` 结果时，页面会在素材卡片、Prompt、Facebook Ads 文案和评估区之后展示 `Creative Brief Markdown` 区域。
+
+这个区域会把当前生成结果整理成可复制的 Markdown Brief，包含 campaign summary、5 套 creative concepts、scoring report、media production notes、launch plan 和 forbidden claims check。它可以直接分享给素材制作团队、media buyer 或客户，用于后续剪辑、配音、视频工具生成和投放沟通。
+
+页面提供 `Copy Full Brief` 按钮；如果浏览器复制权限不可用，也可以在 textarea 中手动全选复制。
+
+当结果为 `BLOCKED` 时，页面不会生成 Creative Brief。BLOCKED 页面只展示阻断原因、风险、替代表达、下一步动作、结构化需求和 Raw JSON，避免把未通过红线审核的内容包装成交付 Brief。
+
+Raw JSON 仍然保留在页面底部，方便调试、对接和复核完整结构。
+
 ## 本地 Web Demo
 
 进入项目目录：
