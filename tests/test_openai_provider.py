@@ -54,6 +54,33 @@ class OpenAIProviderTests(unittest.TestCase):
             prompt = client.calls[-1]["input"]
             self.assertIn(language, prompt)
 
+    def test_crypto_exchange_template_guidance_is_included_in_generation_prompt(self):
+        client = FakeClient(self._generation_payload())
+        provider = OpenAIProvider(api_key="test-key", model="gpt-test", client=client)
+
+        provider.generate_content(
+            {
+                "name": "Spikex",
+                "category": "crypto exchange",
+                "selling_points": "AI copy trading, crypto trading, US stocks trading, fast onboarding",
+                "forbidden_claims": "guaranteed profit, risk-free, no loss",
+            },
+            {
+                "raw_input": "Facebook Brazil 15s crypto exchange onboarding",
+                "structured": {"语言": "pt-BR", "平台": "Facebook", "国家": "巴西"},
+            },
+            [],
+            [],
+            {"status": "PASS"},
+        )
+
+        prompt = client.calls[-1]["input"]
+        self.assertIn("Crypto Exchange / Trading V1", prompt)
+        self.assertIn("copy trading com IA", prompt)
+        self.assertIn("guaranteed profit", prompt)
+        self.assertIn("no guaranteed profit visuals", prompt)
+        self.assertIn("forbidden_claims and campaign_rules are compliance references", prompt)
+
     def test_generate_content_parses_required_json_fields(self):
         client = FakeClient(self._generation_payload())
         provider = OpenAIProvider(api_key="test-key", model="gpt-test", client=client)
