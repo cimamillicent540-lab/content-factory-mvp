@@ -22,6 +22,16 @@ class FakeClient:
         self.responses = FakeResponses(self)
 
 
+class FailingResponses:
+    def create(self, **kwargs):
+        raise RuntimeError("network unavailable")
+
+
+class FailingClient:
+    def __init__(self):
+        self.responses = FailingResponses()
+
+
 class OpenAIProviderTests(unittest.TestCase):
     def test_structure_demand_parses_structured_json(self):
         client = FakeClient({"平台": "Facebook", "国家": "巴西", "人群": "新用户", "场景": "移动端", "目标": "注册转化", "时长": "15秒", "输出物": ["脚本"], "缺失信息": []})
@@ -48,8 +58,39 @@ class OpenAIProviderTests(unittest.TestCase):
         client = FakeClient(self._generation_payload())
         provider = OpenAIProvider(api_key="test-key", model="gpt-test", client=client)
         result = provider.generate_content({"name": "CopyTrade Pro"}, {"structured": {"语言": "en"}}, [], [], {"status": "PASS"})
-        self.assertEqual(result["素材方向"], "Direction")
-        self.assertIn("15秒脚本", result["脚本"])
+        self.assertIn("campaign_summary", result)
+        self.assertIn("scoring_report", result)
+        self.assertIn("media_production_notes", result)
+        self.assertIn("launch_plan", result)
+        self.assertIn("forbidden_claims_check", result)
+        self.assertEqual(len(result["video_ad_concepts"]), 5)
+        self.assertEqual(result["video_ad_concepts"][0]["concept_id"], "C01")
+        self.assertIn("15s_script", result["video_ad_concepts"][0])
+
+    def test_blocked_generation_returns_controlled_blocked_payload_without_openai_call(self):
+        client = FakeClient(self._generation_payload())
+        provider = OpenAIProvider(api_key="test-key", model="gpt-test", client=client)
+        result = provider.generate_content(
+            {"name": "CopyTrade Pro"},
+            {"raw_input": "保证收益", "structured": {"语言": "en"}},
+            [],
+            [],
+            {
+                "status": "FATAL_FAILED",
+                "risks": ["保证收益"],
+                "risk_explanation": "命中禁用表达",
+                "next_actions": ["删除禁用表达"],
+            },
+        )
+
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertNotIn("video_ad_concepts", result)
+        self.assertEqual(result["risks"], ["保证收益"])
+        self.assertIn("risk_explanation", result)
+        self.assertIn("safer_alternatives", result)
+        self.assertIn("next_actions", result)
+        self.assertIn("forbidden_claims_check", result)
+        self.assertEqual(client.calls, [])
 
     def test_responses_create_uses_text_format_instead_of_response_format(self):
         client = FakeClient({"平台": "Facebook", "国家": "巴西", "人群": "新用户", "场景": "移动端", "目标": "注册转化", "时长": "15秒", "输出物": ["脚本"], "缺失信息": []})
@@ -80,17 +121,57 @@ class OpenAIProviderTests(unittest.TestCase):
         with self.assertRaisesRegex(ProviderResponseError, "JSON"):
             provider.structure_demand("demo", {})
 
+    def test_empty_response_returns_readable_error(self):
+        client = FakeClient({})
+        client.response = type("Response", (), {"output_text": ""})()
+        provider = OpenAIProvider(api_key="test-key", model="gpt-test", client=client)
+        with self.assertRaisesRegex(ProviderResponseError, "empty"):
+            provider.structure_demand("demo", {})
+
+    def test_openai_api_failure_returns_readable_error(self):
+        provider = OpenAIProvider(api_key="test-key", model="gpt-test", client=FailingClient())
+        with self.assertRaisesRegex(ProviderResponseError, "OpenAI API call failed"):
+            provider.structure_demand("demo", {})
+
+    def test_missing_generation_fields_returns_readable_error(self):
+        client = FakeClient({"campaign_summary": {}, "video_ad_concepts": []})
+        provider = OpenAIProvider(api_key="test-key", model="gpt-test", client=client)
+        with self.assertRaisesRegex(ProviderResponseError, "素材内容 JSON missing required fields"):
+            provider.generate_content({"name": "CopyTrade Pro"}, {"structured": {"语言": "en"}}, [], [], {"status": "PASS"})
+
+    def test_missing_concept_fields_returns_readable_error(self):
+        payload = self._generation_payload()
+        del payload["video_ad_concepts"][0]["runway_prompt"]
+        client = FakeClient(payload)
+        provider = OpenAIProvider(api_key="test-key", model="gpt-test", client=client)
+        with self.assertRaisesRegex(ProviderResponseError, "video_ad_concepts\\[0\\] JSON missing required fields"):
+            provider.generate_content({"name": "CopyTrade Pro"}, {"structured": {"语言": "en"}}, [], [], {"status": "PASS"})
+
     def _generation_payload(self):
         return {
-            "素材方向": "Direction",
-            "脚本": {"10秒脚本": "A", "15秒脚本": "B", "30秒脚本": "C"},
-            "旁白": "Voice",
-            "字幕": ["Caption"],
-            "分镜": [{"镜头": 1}],
-            "Runway Prompt": "Runway",
-            "HeyGen Prompt": "HeyGen",
-            "ElevenLabs Prompt": "ElevenLabs",
-            "Facebook广告文案": "Facebook",
-            "TikTok广告文案": "TikTok",
-            "合规提醒": "Safe",
+            "campaign_summary": {"产品": "CopyTrade Pro", "投放语言": "en"},
+            "video_ad_concepts": [
+                {
+                    "concept_id": f"C{index:02d}",
+                    "concept_name": f"Concept {index}",
+                    "target_angle": "New users",
+                    "hook": "Check the product rules first.",
+                    "scene_breakdown": "Open with mobile UI, show product facts, close with CTA.",
+                    "15s_script": "Check CopyTrade Pro, review the real rules, then decide.",
+                    "voiceover": "Review the real interface and rules before you start.",
+                    "captions": ["Check the rules", "Review the interface"],
+                    "visual_style": "Clean mobile UI",
+                    "runway_prompt": "English mobile ad with real UI.",
+                    "elevenlabs_prompt": "English voiceover, calm and credible.",
+                    "facebook_primary_text": "Check CopyTrade Pro before joining.",
+                    "facebook_headline": "Check CopyTrade Pro",
+                    "facebook_description": "Review the rules first.",
+                    "compliance_notes": "No guaranteed returns.",
+                }
+                for index in range(1, 6)
+            ],
+            "scoring_report": {"total_score": 90},
+            "media_production_notes": {"Runway 生成建议": "Use real UI screenshots."},
+            "launch_plan": {"推荐优先测试": ["C01"]},
+            "forbidden_claims_check": {"是否命中禁用词": False, "命中的词": []},
         }
