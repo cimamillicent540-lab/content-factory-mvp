@@ -43,6 +43,9 @@ class WebUiTests(unittest.TestCase):
     def test_homepage_includes_demo_fill_buttons(self):
         _status, _headers, body = self.app.handle("GET", "/")
 
+        self.assertIn("Product Profiles", body)
+        self.assertIn("Use Spikex Brazil Profile", body)
+        self.assertIn("fillProfile('spikex_brazil')", body)
         self.assertIn("Spikex Brazil Demo", body)
         self.assertIn("BLOCKED Risk Demo", body)
         self.assertIn("Clear Form", body)
@@ -172,6 +175,22 @@ class WebUiTests(unittest.TestCase):
         self.assertIn("runway_prompt", body)
         self.assertIn("Raw JSON", body)
 
+    def test_profile_generated_output_preserves_history_and_product_facts_in_brief(self):
+        _status, _headers, body = self.app.handle("POST", "/generate", self._profile_request())
+        generated = json.loads(body)
+        self.assertEqual(generated["status"], "GENERATED")
+        self.assertEqual(len(generated["素材内容"]["video_ad_concepts"]), 5)
+
+        status, _headers, history_body = self.app.handle("GET", "/history")
+        self.assertEqual(status, 200)
+        self.assertIn(str(generated["generation_id"]), history_body)
+
+        status, _headers, detail_body = self.app.handle("GET", f'/history/{generated["generation_id"]}')
+        self.assertEqual(status, 200)
+        self.assertIn("Creative Brief Markdown", detail_body)
+        self.assertIn("Product Facts", detail_body)
+        self.assertIn("Spikex is positioned as a trading platform", detail_body)
+
     def test_history_detail_blocked_does_not_show_creative_brief(self):
         status, _headers, _body = self.app.handle("POST", "/generate", self._blocked_request())
         self.assertEqual(status, 409)
@@ -227,4 +246,21 @@ class WebUiTests(unittest.TestCase):
         request = self._valid_request()
         request["卖点"] = "guaranteed profit, risk-free trading, no loss"
         request["限制词"] = "none"
+        return request
+
+    def _profile_request(self):
+        request = self._valid_request()
+        request["profile_id"] = "spikex_brazil"
+        request["目标人群"] = "Brazilian retail traders interested in crypto, stocks, copy trading and AI trading tools"
+        request["卖点"] = "AI copy trading, crypto trading, US stocks trading, fast onboarding, beginner-friendly trading experience"
+        request["活动规则"] = "Avoid unrealistic financial promises; Avoid exaggerated claims; Follow platform ad policy; Include risk-aware language; Campaign rules are for compliance context only and should not be copied directly into ad scripts"
+        request["product_facts"] = [
+            "Spikex is positioned as a trading platform",
+            "The product may include AI copy trading messaging",
+            "The product may include crypto trading messaging",
+            "The product may include US stocks trading messaging",
+            "Use modest, factual, risk-aware descriptions",
+            "Do not claim guaranteed results",
+            "Do not imply trading is risk-free",
+        ]
         return request
