@@ -1,10 +1,11 @@
 import argparse
+import html
 import json
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from content_factory.config import load_settings
-from content_factory.db import connect, init_db
+from content_factory.db import connect, init_db, loads_json
 from content_factory.provider_factory import create_provider
 from content_factory.services import (
     get_generation_result,
@@ -26,6 +27,13 @@ class ContentFactoryAPI:
     def handle(self, method, path, payload=None):
         if method == "GET" and path == "/":
             return 200, dict(HTML_HEADERS), _homepage_html()
+
+        if method == "GET" and path == "/history":
+            return self._handle_history()
+
+        history_match = re.fullmatch(r"/history/(\d+|blocked-\d+)", path)
+        if method == "GET" and history_match:
+            return self._handle_history_detail(history_match.group(1))
 
         if method == "GET" and path == "/health":
             return self._json(200, {"status": "ok", "message": "内容工厂 API 正常"})
@@ -108,6 +116,66 @@ class ContentFactoryAPI:
             },
         )
 
+    def _handle_history(self):
+        rows = self.conn.execute(
+            """
+            SELECT
+                ma.id AS audit_id,
+                ma.status AS audit_status,
+                ma.created_at AS audit_created_at,
+                cg.id AS generation_id,
+                cg.created_at AS generation_created_at,
+                cg.generation_json AS generation_json,
+                p.name AS product,
+                p.category AS industry,
+                p.platform AS platform,
+                p.country AS country,
+                di.structured_json AS structured_json
+            FROM material_audits ma
+            JOIN products p ON p.id = ma.product_id
+            JOIN demand_intakes di ON di.id = ma.demand_id
+            LEFT JOIN content_generations cg ON cg.audit_id = ma.id
+            ORDER BY ma.id DESC
+            LIMIT 50
+            """
+        ).fetchall()
+        return 200, dict(HTML_HEADERS), _history_html(rows)
+
+    def _handle_history_detail(self, history_id):
+        if history_id.startswith("blocked-"):
+            audit_id = int(history_id.replace("blocked-", "", 1))
+            row = self.conn.execute(
+                """
+                SELECT
+                    ma.id AS audit_id,
+                    ma.status AS audit_status,
+                    ma.audit_json AS audit_json,
+                    ma.created_at AS created_at,
+                    p.name AS product,
+                    p.category AS industry,
+                    p.platform AS platform,
+                    p.country AS country,
+                    di.raw_input AS raw_input,
+                    di.structured_json AS structured_json
+                FROM material_audits ma
+                JOIN products p ON p.id = ma.product_id
+                JOIN demand_intakes di ON di.id = ma.demand_id
+                LEFT JOIN content_generations cg ON cg.audit_id = ma.id
+                WHERE ma.id = ? AND cg.id IS NULL
+                """,
+                (audit_id,),
+            ).fetchone()
+            if row is None:
+                return 404, dict(HTML_HEADERS), _history_not_found_html(history_id)
+            return 200, dict(HTML_HEADERS), _blocked_history_detail_html(row)
+
+        generation_id = int(history_id)
+        saved = get_generation_result(self.conn, generation_id)
+        if saved is None:
+            return 404, dict(HTML_HEADERS), _history_not_found_html(history_id)
+        generation_row = self.conn.execute("SELECT created_at FROM content_generations WHERE id = ?", (generation_id,)).fetchone()
+        return 200, dict(HTML_HEADERS), _generated_history_detail_html(generation_id, saved, generation_row["created_at"] if generation_row else "")
+
     def _json(self, status, payload):
         return status, dict(JSON_HEADERS), json.dumps(payload, ensure_ascii=False, indent=2)
 
@@ -169,6 +237,253 @@ def _load_demand(conn, demand_id):
 
 def _default_performance_metrics():
     return {"ctr": 0.8, "cpa": 20, "play_3s": 1000, "play_50": 300}
+
+
+def _escape(value):
+    return html.escape(str(value if value is not None else ""), quote=True)
+
+
+def _format_brief_value(value):
+    if isinstance(value, list):
+        return " / ".join(str(item) for item in value)
+    if isinstance(value, dict):
+        return " / ".join(f"{key}: {_format_brief_value(item)}" for key, item in value.items())
+    return str(value if value is not None else "")
+
+
+def _brief_line(label, value):
+    if value in (None, ""):
+        return None
+    if isinstance(value, (list, dict)) and not value:
+        return None
+    return f"- {label}: {_format_brief_value(value)}"
+
+
+def _creative_brief_markdown(saved, generation_id):
+    product = saved.get("product", {})
+    demand = saved.get("demand", {}).get("structured", {})
+    generation = saved.get("generation", {})
+    summary = generation.get("campaign_summary", {})
+    concepts = generation.get("video_ad_concepts", [])
+    report = generation.get("scoring_report", {})
+    notes = generation.get("media_production_notes", {})
+    launch_plan = generation.get("launch_plan", {})
+    forbidden_check = generation.get("forbidden_claims_check", {})
+    lines = ["# Creative Brief", "", "## Campaign Summary"]
+    for line in (
+        _brief_line("generation_id", generation_id),
+        _brief_line("product", summary.get("产品") or product.get("name")),
+        _brief_line("industry", product.get("category")),
+        _brief_line("platform", summary.get("平台") or product.get("platform")),
+        _brief_line("country", summary.get("国家") or product.get("country")),
+        _brief_line("language", summary.get("投放语言") or demand.get("语言")),
+        _brief_line("audience", summary.get("目标人群") or demand.get("人群")),
+        _brief_line("selling points", summary.get("核心卖点") or product.get("selling_points")),
+        _brief_line("campaign rules summary", product.get("campaign_rules")),
+    ):
+        if line:
+            lines.append(line)
+
+    lines.extend(["", "## Creative Concepts"])
+    for concept in concepts:
+        lines.extend(["", f"### {_format_brief_value(concept.get('concept_id'))} {_format_brief_value(concept.get('concept_name'))}".strip()])
+        for key in (
+            "target_angle",
+            "hook",
+            "scene_breakdown",
+            "15s_script",
+            "voiceover",
+            "captions",
+            "visual_style",
+            "runway_prompt",
+            "elevenlabs_prompt",
+            "facebook_primary_text",
+            "facebook_headline",
+            "facebook_description",
+            "compliance_notes",
+        ):
+            line = _brief_line(key, concept.get(key))
+            if line:
+                lines.append(line)
+
+    lines.extend(["", "## Scoring Report"])
+    for key in (
+        "total_score",
+        "hook_score",
+        "clarity_score",
+        "compliance_score",
+        "localization_score",
+        "conversion_potential_score",
+        "improvement_suggestions",
+    ):
+        line = _brief_line(key, report.get(key))
+        if line:
+            lines.append(line)
+
+    lines.extend(["", "## Media Production Notes"])
+    for key, value in notes.items():
+        line = _brief_line(key, value)
+        if line:
+            lines.append(line)
+
+    lines.extend(["", "## Launch Plan"])
+    for key, value in launch_plan.items():
+        line = _brief_line(key, value)
+        if line:
+            lines.append(line)
+
+    lines.extend(["", "## Forbidden Claims Check"])
+    for key, value in forbidden_check.items():
+        line = _brief_line(key, value)
+        if line:
+            lines.append(line)
+    return "\n".join(lines)
+
+
+def _history_html(rows):
+    cards = []
+    for row in rows:
+        structured = loads_json(row["structured_json"], {})
+        generation = loads_json(row["generation_json"], {}) if row["generation_json"] else {}
+        status = "GENERATED" if row["generation_id"] else "BLOCKED"
+        history_id = str(row["generation_id"]) if row["generation_id"] else f"blocked-{row['audit_id']}"
+        concept_count = len(generation.get("video_ad_concepts", [])) if generation else 0
+        cards.append(
+            f"""
+            <article class="history-card">
+              <h2>{_escape(status)} #{_escape(history_id)}</h2>
+              <p>generation_id: {_escape(history_id)}</p>
+              <p>status: {_escape(status)}</p>
+              <p>created_at: {_escape(row["generation_created_at"] or row["audit_created_at"])}</p>
+              <p>industry: {_escape(row["industry"])}</p>
+              <p>product: {_escape(row["product"])}</p>
+              <p>platform: {_escape(row["platform"])}</p>
+              <p>country: {_escape(row["country"])}</p>
+              <p>language: {_escape(structured.get("语言", ""))}</p>
+              <p>concept count: {_escape(concept_count)}</p>
+              <p>is BLOCKED: {_escape(status == "BLOCKED")}</p>
+              <a href="/history/{_escape(history_id)}">View</a>
+            </article>
+            """
+        )
+    body = "\n".join(cards) or "<p>No generation history yet.</p>"
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>Generation History</title>{_history_style()}</head>
+<body><main>
+  <nav><a href="/">Back to Generator</a></nav>
+  <h1>Generation History</h1>
+  <p>Recent local saved briefs and blocked generation attempts.</p>
+  {body}
+</main></body></html>"""
+
+
+def _generated_history_detail_html(generation_id, saved, created_at):
+    brief = _creative_brief_markdown(saved, generation_id)
+    generation = saved.get("generation", {})
+    concepts = generation.get("video_ad_concepts", [])
+    raw_payload = {
+        "status": "GENERATED",
+        "generation_id": generation_id,
+        "created_at": created_at,
+        "product": saved.get("product", {}),
+        "结构化需求": saved.get("demand", {}).get("structured", {}),
+        "红线审核结果": saved.get("audit", {}),
+        "素材内容": saved.get("generation", {}),
+        "100分评分报告": saved.get("evaluation", {}),
+        "投放记录": saved.get("performance_logs", []),
+    }
+    concept_cards = "\n".join(
+        f"<article class=\"history-card\"><h3>{_escape(concept.get('concept_id'))} {_escape(concept.get('concept_name'))}</h3>"
+        f"<p>hook: {_escape(concept.get('hook'))}</p>"
+        f"<p>runway_prompt: {_escape(concept.get('runway_prompt'))}</p>"
+        f"<p>elevenlabs_prompt: {_escape(concept.get('elevenlabs_prompt'))}</p></article>"
+        for concept in concepts
+    )
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>Generation Detail</title>{_history_style()}</head>
+<body><main>
+  <nav><a href="/history">Back to History</a></nav>
+  <h1>Generation Detail</h1>
+  <p>status: GENERATED</p>
+  <p>generation_id: {_escape(generation_id)}</p>
+  <p>created_at: {_escape(created_at)}</p>
+  <section><h2>Creative Brief Markdown</h2><button type="button" onclick="copyFullBrief()">Copy Full Brief</button><textarea id="creative-brief-markdown" class="brief-copy-box" readonly>{_escape(brief)}</textarea></section>
+  <section><h2>Creative Concepts</h2>{concept_cards}</section>
+  <section><h2>Raw JSON</h2><pre>{_escape(json.dumps(raw_payload, ensure_ascii=False, indent=2))}</pre></section>
+  <script>{_copy_script()}</script>
+</main></body></html>"""
+
+
+def _blocked_history_detail_html(row):
+    audit = loads_json(row["audit_json"], {})
+    structured = loads_json(row["structured_json"], {})
+    risks = audit.get("risks") or audit.get("missing_materials") or []
+    raw_payload = {
+        "status": "BLOCKED",
+        "generation_id": f"blocked-{row['audit_id']}",
+        "created_at": row["created_at"],
+        "product": {
+            "name": row["product"],
+            "category": row["industry"],
+            "platform": row["platform"],
+            "country": row["country"],
+        },
+        "结构化需求": structured,
+        "红线审核结果": audit,
+        "阻断原因": risks,
+    }
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>Generation Detail</title>{_history_style()}</head>
+<body><main>
+  <nav><a href="/history">Back to History</a></nav>
+  <h1>Generation Detail</h1>
+  <section class="danger">
+    <h2>BLOCKED</h2>
+    <p>阻断原因: {_escape(", ".join(str(item) for item in risks))}</p>
+    <p>risks: {_escape(", ".join(str(item) for item in audit.get("risks", [])))}</p>
+    <p>risk_explanation: {_escape(audit.get("risk_explanation") or audit.get("summary", ""))}</p>
+    <p>safer_alternatives: {_escape(_format_brief_value(audit.get("替代表达建议", [])))}</p>
+    <p>next_actions: {_escape(_format_brief_value(audit.get("next_actions", [])))}</p>
+  </section>
+  <section><h2>Raw JSON</h2><pre>{_escape(json.dumps(raw_payload, ensure_ascii=False, indent=2))}</pre></section>
+</main></body></html>"""
+
+
+def _history_not_found_html(history_id):
+    return f"""<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>History record not found</title>{_history_style()}</head>
+<body><main><h1>History record not found</h1><p>No saved generation history for {_escape(history_id)}.</p><a href="/history">Back to History</a></main></body></html>"""
+
+
+def _history_style():
+    return """<style>
+      body { margin: 0; background: #f5f7fb; color: #172033; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      main { max-width: 1120px; margin: 0 auto; padding: 28px 20px 48px; }
+      a { color: #155eef; font-weight: 700; }
+      .history-card, section { margin-top: 16px; padding: 16px; border: 1px solid #dde3ef; border-radius: 8px; background: #fff; }
+      .danger { border-color: #f2b8b5; background: #fff7f6; }
+      textarea.brief-copy-box { width: 100%; min-height: 420px; box-sizing: border-box; background: #101828; color: #e6edf7; border: 1px solid #101828; border-radius: 8px; padding: 14px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      pre { overflow: auto; white-space: pre-wrap; background: #101828; color: #e6edf7; padding: 14px; border-radius: 8px; }
+      button { border: 1px solid #155eef; border-radius: 6px; padding: 10px 16px; background: #155eef; color: #fff; font-weight: 700; cursor: pointer; }
+    </style>"""
+
+
+def _copy_script():
+    return """
+      async function copyFullBrief() {
+        const target = document.getElementById('creative-brief-markdown');
+        if (!target) return;
+        target.select();
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(target.value);
+        } else {
+          document.execCommand('copy');
+        }
+      }
+    """
 
 
 def _homepage_html():
@@ -425,6 +740,7 @@ def _homepage_html():
       statusBox.className = 'status generated';
       statusBox.textContent = `GENERATED generation_id=${result.generation_id} 素材内容`;
       output.innerHTML = `
+        <section class="section"><h2>Saved to History</h2><p>Saved to History · <a href="/history">View History</a></p></section>
         <section class="section">${renderStatus(result, summary)}</section>
         <section class="section"><h2>5 套素材卡片</h2>${concepts.map(renderCreativeCard).join('')}</section>
         <section class="section"><h2>Prompt 专区</h2>${concepts.map(renderPromptBlock).join('')}</section>
@@ -617,6 +933,7 @@ def _homepage_html():
       output.innerHTML = `<section class="section danger">
         <h2>BLOCKED</h2>
         <p>BLOCKED 状态不展示素材卡片</p>
+        <p>Saved to History · <a href="/history">View History</a></p>
         <div class="grid">
           ${field('阻断原因', (result["阻断原因"] || []).join('，'))}
           ${field('summary', audit.summary)}
