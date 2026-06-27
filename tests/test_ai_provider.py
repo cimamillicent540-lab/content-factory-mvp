@@ -1,6 +1,7 @@
 import unittest
 
 from content_factory.ai_provider import MockAIProvider
+from content_factory.industry_templates import detect_industry_template
 
 
 class MockAIProviderTests(unittest.TestCase):
@@ -120,6 +121,17 @@ class MockAIProviderTests(unittest.TestCase):
         self.assertEqual(demand_result["status"], "FATAL_FAILED")
         self.assertIn("risk-free", demand_result["risks"])
 
+    def test_crypto_exchange_template_is_selected_from_industry(self):
+        template = detect_industry_template(
+            {"category": "crypto exchange", "name": "Spikex"},
+            {"raw_input": "Facebook Brazil 15s", "structured": {}},
+        )
+
+        self.assertIsNotNone(template)
+        self.assertEqual(template["name"], "Crypto Exchange / Trading V1")
+        self.assertIn("AI copy trading discovery angle", template["approved_angles"])
+        self.assertIn("negociação de criptomoedas", template["brazilian_portuguese_terms"].values())
+
     def test_generate_content_returns_upgraded_mock_outputs(self):
         result = self.provider.generate_content(self.product, self.demand, [], [], {"status": "PASS", "summary": "素材足够"})
         self.assertIn("campaign_summary", result)
@@ -181,6 +193,7 @@ class MockAIProviderTests(unittest.TestCase):
         product = dict(
             self.product,
             name="Spikex",
+            category="crypto exchange",
             selling_points="AI copy trading, crypto and US stocks trading, fast onboarding, beginner-friendly trading experience",
         )
         demand = {
@@ -202,6 +215,80 @@ class MockAIProviderTests(unittest.TestCase):
         self.assertIn("ações dos EUA", all_official_text)
         self.assertIn("cadastro rápido", all_official_text)
         self.assertIn("experiência simples para iniciantes", all_official_text)
+
+    def test_spikex_brazil_crypto_template_generates_exchange_specific_angles(self):
+        product = dict(
+            self.product,
+            name="Spikex",
+            category="crypto exchange",
+            selling_points="AI copy trading, crypto trading, US stocks trading, fast onboarding, beginner-friendly trading experience",
+            forbidden_claims="guaranteed profit, risk-free, no loss",
+        )
+        demand = {
+            "raw_input": "Facebook Brazil 15s crypto exchange onboarding",
+            "structured": {
+                "语言": "pt-BR",
+                "平台": "Facebook",
+                "国家": "巴西",
+                "人群": "Brazilian retail traders interested in crypto, stocks, copy trading and AI trading tools",
+                "场景": "mobile browsing",
+                "目标": "signup",
+            },
+        }
+
+        result = self.provider.generate_content(product, demand, [], [], {"status": "PASS"})
+        official_text = " ".join(self._official_concept_text(concept) for concept in result["video_ad_concepts"])
+
+        self.assertEqual(len(result["video_ad_concepts"]), 5)
+        self._assert_no_chinese_characters(official_text)
+        for expected in (
+            "demonstração da plataforma",
+            "copy trading com IA",
+            "conteúdo educativo",
+            "acesso ao mercado",
+            "consciência de risco",
+            "ferramentas de negociação",
+        ):
+            self.assertIn(expected, official_text)
+
+    def test_crypto_high_risk_selling_point_blocks_generation(self):
+        materials = [
+            {"grade": "必须人工补充的红线素材", "name": "真实logo", "compliant": 1},
+            {"grade": "必须人工补充的红线素材", "name": "真实界面", "compliant": 1},
+            {"grade": "必须人工补充的红线素材", "name": "真实活动规则", "compliant": 1},
+        ]
+        product = dict(self.product, category="crypto exchange", selling_points="AI copy trading with profit promise")
+
+        result = self.provider.audit_materials(
+            product,
+            {"raw_input": "Facebook Brazil 15s", "structured": {"语言": "pt-BR"}},
+            materials,
+        )
+
+        self.assertEqual(result["status"], "FATAL_FAILED")
+        self.assertIn("profit promise", result["risks"])
+
+    def test_crypto_forbidden_claims_reference_does_not_block_by_itself(self):
+        materials = [
+            {"grade": "必须人工补充的红线素材", "name": "真实logo", "compliant": 1},
+            {"grade": "必须人工补充的红线素材", "name": "真实界面", "compliant": 1},
+            {"grade": "必须人工补充的红线素材", "name": "真实活动规则", "compliant": 1},
+        ]
+        product = dict(
+            self.product,
+            category="crypto exchange",
+            selling_points="AI copy trading, trading tools, market access",
+            campaign_rules="Review campaign rules and avoid financial freedom guaranteed wording.",
+            forbidden_claims="financial freedom guaranteed, easy money, win every trade",
+        )
+
+        result = self.provider.audit_materials(
+            product,
+            {"raw_input": "Facebook Brazil 15s platform walkthrough", "structured": {"语言": "pt-BR"}},
+            materials,
+        )
+
+        self.assertEqual(result["status"], "PASS")
 
     def test_non_chinese_official_mock_fields_do_not_contain_chinese_characters(self):
         cases = {

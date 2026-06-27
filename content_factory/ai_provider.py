@@ -1,6 +1,7 @@
 import json
 import re
 
+from content_factory.industry_templates import CRYPTO_EXCHANGE_TEMPLATE, detect_industry_template, template_guidance_text
 from content_factory.models import EVALUATION_WEIGHTS
 
 
@@ -109,11 +110,12 @@ class MockAIProvider:
     def generate_content(self, product, demand, materials, benchmarks, audit):
         structured = demand.get("structured", {})
         language = self._normalize_language(structured.get("语言", "zh"))
+        industry_template = detect_industry_template(product, demand)
         product_name = product.get("name", "该产品")
         audience = structured.get("人群") or self._extract_audience(demand.get("raw_input", ""), product)
         scene = self._localized_scene(language, structured.get("场景", "移动端使用场景"))
         goal = self._localized_goal(language, structured.get("目标", "转化"))
-        selling_points = self._localized_points(language, product.get("selling_points") or "真实卖点")
+        selling_points = self._localized_points(language, product.get("selling_points") or "真实卖点", industry_template)
         campaign_rules = product.get("campaign_rules") or "以落地页真实活动规则为准"
         benchmark_hint = self._localized_benchmark_hint(language)
         if benchmarks:
@@ -138,6 +140,7 @@ class MockAIProvider:
                 selling_points,
                 campaign_rules,
                 benchmark_hint,
+                industry_template,
             ),
             "scoring_report": {
                 "hook_score": 15,
@@ -289,8 +292,29 @@ class MockAIProvider:
             }[language]
         return goal
 
-    def _localized_points(self, language, points):
+    def _localized_points(self, language, points, industry_template=None):
         normalized = (points or "").strip().lower()
+        if language == "pt-BR" and industry_template == CRYPTO_EXCHANGE_TEMPLATE:
+            terms = industry_template["brazilian_portuguese_terms"]
+            ordered_terms = [
+                "AI copy trading",
+                "crypto trading",
+                "US stocks trading",
+                "fast onboarding",
+                "beginner-friendly trading experience",
+                "trading tools",
+                "market access",
+                "risk-aware trading",
+                "platform walkthrough",
+                "educational content",
+            ]
+            localized = [
+                terms[key]
+                for key in ordered_terms
+                if key.lower() in normalized or key in ("trading tools", "market access")
+            ]
+            if localized:
+                return ", ".join(dict.fromkeys(localized))
         if any(
             token in normalized
             for token in (
@@ -368,7 +392,12 @@ class MockAIProvider:
             "不亏钱",
             "100% win",
             "get rich quick",
+            "financial freedom guaranteed",
+            "easy money",
+            "profit promise",
+            "win every trade",
         ]
+        defaults.extend(CRYPTO_EXCHANGE_TEMPLATE["banned_or_high_risk_claims"])
         configured = self._split_claims(configured_claims or "")
         merged = []
         for claim in configured + defaults:
@@ -401,8 +430,8 @@ class MockAIProvider:
             "替代表达建议": self._alternative_claims(hits),
         }
 
-    def _video_ad_concepts(self, language, product_name, audience, scene, goal, selling_points, campaign_rules, benchmark_hint):
-        angles = self._localized_concept_angles(language)
+    def _video_ad_concepts(self, language, product_name, audience, scene, goal, selling_points, campaign_rules, benchmark_hint, industry_template=None):
+        angles = self._localized_concept_angles(language, industry_template)
         concepts = []
         for index, angle in enumerate(angles, start=1):
             concept_id = f"C{index:02d}"
@@ -439,7 +468,88 @@ class MockAIProvider:
             "zh": "Chinese",
         }[language]
 
-    def _localized_concept_angles(self, language):
+    def _crypto_exchange_pt_br_concept_angles(self):
+        return [
+            {
+                "name": "Demonstração da plataforma",
+                "target_angle": "Público: {audience}; pessoa que quer entender uma plataforma de negociação antes de criar conta",
+                "hook": "Veja uma demonstração da plataforma {product} antes de começar.",
+                "scene_breakdown": "Criador brasileiro em vídeo vertical; celular em {scene}; close na interface; {points}; CTA suave para revisar regras.",
+                "script": "Abra com uma pergunta simples sobre negociação de criptomoedas. Mostre {product} no celular, destaque {points} e convide a pessoa a aprender como funciona.",
+                "voiceover": "Esta é uma demonstração da plataforma {product}. Veja as ferramentas, compare informações de mercado e confira as regras antes de decidir.",
+                "captions": ["demonstração da plataforma", "{points}", "confira as regras"],
+                "visual_style": "Vídeo vertical UGC, close-up de interface do app, layout limpo mobile-first, sem imagens de luxo ou dinheiro.",
+                "runway_prompt": "Anúncio vertical em português do Brasil, criador brasileiro mostrando tela de celular, demonstração da plataforma {product}, interface simples, legendas grandes, sem pilhas de dinheiro, sem promessa de lucro. {hint}",
+                "elevenlabs_prompt": "Brazilian Portuguese voiceover, natural Brazilian creator tone, calm, factual, risk-aware.",
+                "facebook_primary_text": "Explore {product}: {points}. Veja a demonstração da plataforma e confira as regras antes de usar.",
+                "facebook_headline": "Veja como funciona",
+                "facebook_description": "Demonstração simples da plataforma.",
+            },
+            {
+                "name": "Descoberta de copy trading com IA",
+                "target_angle": "Público: {audience}; iniciante curioso sobre copy trading com IA",
+                "hook": "Quer entender copy trading com IA sem promessas exageradas?",
+                "scene_breakdown": "Primeiros 3 segundos com pergunta na tela; interface do app; fluxo de descoberta; lembrete de risco.",
+                "script": "Apresente o copy trading com IA como recurso de descoberta. Mostre {product}, explique {points} e reforce que cada pessoa deve avaliar as regras e riscos.",
+                "voiceover": "Com {product}, você pode explorar copy trading com IA e entender ferramentas de negociação antes de tomar suas próprias decisões.",
+                "captions": ["copy trading com IA", "entenda as ferramentas", "decida com consciência de risco"],
+                "visual_style": "Criador falando para câmera com cortes rápidos para tela do app, subtítulo em primeiro plano.",
+                "runway_prompt": "Brazilian Portuguese UGC ad, creator talking to camera, app screen walkthrough, AI copy trading discovery, subtitle-first vertical video, no guaranteed profit visuals.",
+                "elevenlabs_prompt": "Brazilian Portuguese voiceover, friendly, educational, modest claims, no urgency pressure.",
+                "facebook_primary_text": "Entenda copy trading com IA em {product}. Explore ferramentas, leia as regras e gerencie suas próprias decisões.",
+                "facebook_headline": "Copy trading com IA",
+                "facebook_description": "Conteúdo educativo sobre o recurso.",
+            },
+            {
+                "name": "Conteúdo educativo para iniciantes",
+                "target_angle": "Público: {audience}; iniciante que precisa aprender antes de negociar",
+                "hook": "Antes de negociar, entenda o básico da plataforma.",
+                "scene_breakdown": "Tela com checklist educativo; interface; termos principais; CTA para aprender como funciona.",
+                "script": "Use conteúdo educativo para explicar {points}. Mostre {product} com foco em cadastro rápido, ferramentas e revisão das regras.",
+                "voiceover": "Aprenda antes de negociar. Veja os recursos de {product}, compare informações de mercado e revise as regras da plataforma.",
+                "captions": ["conteúdo educativo", "aprenda antes de negociar", "revise as regras"],
+                "visual_style": "Checklist limpo sobre interface real, cortes claros, sem pressão de urgência.",
+                "runway_prompt": "Brazilian Portuguese educational content ad, mobile-first layout, checklist overlays, real app interface, modest factual claims, no easy money messaging.",
+                "elevenlabs_prompt": "Brazilian Portuguese explanatory voice, patient, clear, beginner-friendly.",
+                "facebook_primary_text": "Conteúdo educativo: conheça {product}, entenda {points} e revise as regras antes de negociar.",
+                "facebook_headline": "Aprenda antes",
+                "facebook_description": "Guia simples para iniciantes.",
+            },
+            {
+                "name": "Acesso ao mercado",
+                "target_angle": "Público: {audience}; pessoa comparando acesso a criptomoedas e ações dos EUA",
+                "hook": "Compare recursos de acesso ao mercado em um só fluxo.",
+                "scene_breakdown": "Tela de seleção de mercados; criptomoedas; ações dos EUA; resumo de ferramentas; CTA informativo.",
+                "script": "Mostre acesso ao mercado de forma factual. Apresente {product}, {points}, e mantenha o foco em informação, não em promessa de resultado.",
+                "voiceover": "Em {product}, explore negociação de criptomoedas, negociação de ações dos EUA e ferramentas de negociação com consciência de risco.",
+                "captions": ["acesso ao mercado", "criptomoedas e ações dos EUA", "negocie com consciência de risco"],
+                "visual_style": "Close-up simples da interface, cards de comparação, cores limpas e texto legível.",
+                "runway_prompt": "Brazilian Portuguese vertical mobile ad, market access comparison cards, crypto trading and US stocks trading screens, clean UI, no wealth imagery.",
+                "elevenlabs_prompt": "Brazilian Portuguese voiceover, concise, analytical, factual.",
+                "facebook_primary_text": "Explore acesso ao mercado com {product}: {points}. Compare informações e confira as regras.",
+                "facebook_headline": "Acesso ao mercado",
+                "facebook_description": "Compare recursos da plataforma.",
+            },
+            {
+                "name": "Rotina com consciência de risco",
+                "target_angle": "Público: {audience}; usuário que cria hábito de revisar mercado sem promessas",
+                "hook": "Sua rotina de mercado começa com informação, não promessa.",
+                "scene_breakdown": "Rotina diária; notificação do app; tela de mercado; revisão de regras; CTA suave.",
+                "script": "Conecte {scene} a uma rotina de verificação. Mostre {product}, destaque {points} e finalize com negociação com consciência de risco.",
+                "voiceover": "Na rotina, revise informações, entenda ferramentas e negocie com consciência de risco. Explore {product} sem promessas de resultado.",
+                "captions": ["consciência de risco", "revise informações", "explore recursos"],
+                "visual_style": "UGC lifestyle leve com tela do app em destaque, sem luxo, sem pilhas de dinheiro, sem riqueza exagerada.",
+                "runway_prompt": "Brazilian Portuguese UGC-style phone screen walkthrough, daily market check, risk-aware trading, clean mobile-first layout, no luxury lifestyle claims.",
+                "elevenlabs_prompt": "Brazilian Portuguese voice, calm daily routine tone, compliance-safe and factual.",
+                "facebook_primary_text": "Crie uma rotina de informação com {product}. Explore {points}, confira regras e negocie com consciência de risco.",
+                "facebook_headline": "Consciência de risco",
+                "facebook_description": "Informação antes da decisão.",
+            },
+        ]
+
+    def _localized_concept_angles(self, language, industry_template=None):
+        if language == "pt-BR" and industry_template == CRYPTO_EXCHANGE_TEMPLATE:
+            return self._crypto_exchange_pt_br_concept_angles()
         if language == "pt-BR":
             return [
                 {
@@ -883,9 +993,12 @@ class OpenAIProvider(MockAIProvider):
                 },
             }
         language = demand.get("structured", {}).get("语言", "zh")
+        industry_template = detect_industry_template(product, demand)
         payload = {
             "language": language,
             "language_instruction": self._language_instruction(language),
+            "industry_template": industry_template,
+            "industry_template_guidance": template_guidance_text(industry_template),
             "product": product,
             "demand": demand,
             "materials": materials,
@@ -906,6 +1019,8 @@ class OpenAIProvider(MockAIProvider):
                 "你是海外广告素材生成助手。输出必须是 JSON。字段名必须稳定。"
                 "正式广告脚本、字幕、旁白、广告文案、视频 Prompt 必须按 language 输出；"
                 "后台评分、合规说明和风险说明可以中文。"
+                "如果存在 industry_template_guidance，必须按其中的行业角度、术语、视频风格和禁用表达约束生成。"
+                "forbidden_claims and campaign_rules are compliance references, not formal ad claims."
                 "正常生成时必须返回 campaign_summary、video_ad_concepts、scoring_report、"
                 "media_production_notes、launch_plan、forbidden_claims_check。"
                 "video_ad_concepts 必须正好 5 套。"

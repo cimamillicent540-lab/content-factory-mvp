@@ -255,6 +255,34 @@ PYTHONPYCACHEPREFIX=/private/tmp/codex_pycache python3 -m compileall content_fac
 - 接投放数据回传。
 - 接自动评分、素材复用和下一轮迭代策略。
 
+## Industry templates
+
+当前版本内置 `Crypto Exchange / Trading V1` 行业模板，用于加密货币交易所、交易、crypto exchange、trading、crypto 等投流场景。模板会影响两类输出：
+
+- `MockAIProvider`：当产品行业/品类或需求文本命中 crypto exchange / exchange / trading / crypto 时，Spikex Brazil Demo 会生成更贴近交易所行业的 5 套素材角度。
+- `OpenAIProvider`：命中模板时，会把行业角度、禁用表达、替代表达、巴西葡语术语、视频风格和文案规则写入 LLM prompt，但仍要求返回与 mock 兼容的结构化 JSON。
+
+模板允许的方向包括：新手教育、AI copy trading 发现、平台 walkthrough、market access、risk-aware trading、app onboarding、daily check habit、feature comparison。
+
+高风险表达包括：`guaranteed profit`、`risk-free`、`no loss`、`稳赚`、`保证收益`、`不亏钱`、`100% win`、`get rich quick`、`financial freedom guaranteed`、`easy money`、`profit promise`、`win every trade`。
+
+建议替代表达包括：`explore market tools`、`understand platform features`、`review trading rules`、`trade with risk awareness`、`learn before trading`、`compare market information`、`manage your own trading decisions`、`educational and informational use`。
+
+巴西葡语术语示例：
+
+- `AI copy trading` → `copy trading com IA`
+- `crypto trading` → `negociação de criptomoedas`
+- `US stocks trading` → `negociação de ações dos EUA`
+- `fast onboarding` → `cadastro rápido`
+- `beginner-friendly trading experience` → `experiência simples para iniciantes`
+- `trading tools` → `ferramentas de negociação`
+- `market access` → `acesso ao mercado`
+- `risk-aware trading` → `negociação com consciência de risco`
+- `platform walkthrough` → `demonstração da plataforma`
+- `educational content` → `conteúdo educativo`
+
+红线规则仍保持原有边界：如果高风险表达出现在正式需求、产品名或卖点中，会返回 `BLOCKED` 或素材审核失败；如果只出现在 `forbidden_claims`、`campaign_rules`、合规规则说明中，只作为审核参考，不会自动阻断。
+
 ## Real LLM mode
 
 系统默认仍然使用 `MockAIProvider`，适合本地演示、自动化测试和无密钥环境，不会调用真实 OpenAI API。
