@@ -34,7 +34,7 @@
 再通过环境变量切换，例如：
 
 ```bash
-AI_PROVIDER=openai
+CONTENT_FACTORY_PROVIDER=openai
 OPENAI_API_KEY=你的真实密钥
 ```
 
@@ -255,22 +255,34 @@ PYTHONPYCACHEPREFIX=/private/tmp/codex_pycache python3 -m compileall content_fac
 - 接投放数据回传。
 - 接自动评分、素材复用和下一轮迭代策略。
 
-## OpenAI Provider 使用说明
+## Real LLM mode
 
-系统默认仍然使用 `MockAIProvider`，适合本地开发和自动化测试，不会调用真实 OpenAI API：
-
-```bash
-CONTENT_FACTORY_PROVIDER=mock
-```
-
-开启真实 OpenAI 模式需要设置：
+系统默认仍然使用 `MockAIProvider`，适合本地演示、自动化测试和无密钥环境，不会调用真实 OpenAI API。
 
 ```bash
-CONTENT_FACTORY_PROVIDER=openai
-OPENAI_API_KEY=你的真实密钥
-OPENAI_MODEL=gpt-4.1-mini
+unset OPENAI_API_KEY
+unset OPENAI_MODEL
+CONTENT_FACTORY_PROVIDER=mock python3 -m content_factory.api --host 127.0.0.1 --port 8000
 ```
 
-不要提交真实 API key。`CONTENT_FACTORY_PROVIDER=openai` 但缺少 `OPENAI_API_KEY` 时，系统会返回清晰配置错误。
+OpenAI 模式会使用 `OpenAIProvider` 调用真实 OpenAI API，需要配置 `OPENAI_API_KEY`。不要把 `OPENAI_API_KEY` 提交到 Git，也不要写入代码、测试或文档示例中的真实值。
 
-OpenAIProvider 会要求 LLM 返回结构化 JSON；测试使用 fake client，不调用真实 API。正式素材语言仍支持 `pt-BR` / `es` / `en` / `zh`，红线命中时仍返回 `BLOCKED`，不生成正式素材内容。
+```bash
+export OPENAI_API_KEY="your_api_key_here"
+export OPENAI_MODEL="gpt-4.1-mini"
+CONTENT_FACTORY_PROVIDER=openai python3 -m content_factory.api --host 127.0.0.1 --port 8000
+```
+
+如果 `CONTENT_FACTORY_PROVIDER=openai` 但缺少 `OPENAI_API_KEY`，系统不会静默回退到 mock，而是返回清晰配置错误。
+
+OpenAIProvider 会要求 LLM 返回结构化 JSON，生成结果必须保持与 mock 输出兼容：`campaign_summary`、5 套 `video_ad_concepts`、`scoring_report`、`media_production_notes`、`launch_plan`、`forbidden_claims_check`。正式素材语言仍支持 `pt-BR` / `es` / `en` / `zh`，红线命中时仍返回 `BLOCKED`，不生成正式素材内容。
+
+自动化测试仍使用 mock 或 fake client，不调用真实 OpenAI API：
+
+```bash
+unset OPENAI_API_KEY
+unset OPENAI_MODEL
+CONTENT_FACTORY_PROVIDER=mock python3 -m unittest discover -v
+
+python3 -m compileall content_factory tests
+```

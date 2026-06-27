@@ -869,7 +869,19 @@ class OpenAIProvider(MockAIProvider):
 
     def generate_content(self, product, demand, materials, benchmarks, audit):
         if audit.get("status") in ("HUMAN_REQUIRED", "FATAL_FAILED"):
-            return {"status": "BLOCKED", "阻断原因": audit.get("risks") or audit.get("missing_materials", [])}
+            risks = audit.get("risks") or audit.get("missing_materials", [])
+            return {
+                "status": "BLOCKED",
+                "risks": risks,
+                "risk_explanation": audit.get("risk_explanation") or audit.get("summary") or "素材审核未通过，禁止生成正式素材。",
+                "safer_alternatives": audit.get("替代表达建议") or ["删除高风险表达，改用真实产品功能、活动规则和风险提示。"],
+                "next_actions": audit.get("next_actions", ["修复素材或需求后重新审核"]),
+                "forbidden_claims_check": {
+                    "是否命中禁用词": bool(risks),
+                    "命中的词": risks,
+                    "风险说明": audit.get("risk_explanation") or audit.get("summary") or "素材审核未通过。",
+                },
+            }
         language = demand.get("structured", {}).get("语言", "zh")
         payload = {
             "language": language,
@@ -880,31 +892,27 @@ class OpenAIProvider(MockAIProvider):
             "benchmarks": benchmarks,
             "audit": audit,
             "required_fields": [
-                "素材方向",
-                "脚本",
-                "旁白",
-                "字幕",
-                "分镜",
-                "Runway Prompt",
-                "HeyGen Prompt",
-                "ElevenLabs Prompt",
-                "Facebook广告文案",
-                "TikTok广告文案",
-                "合规提醒",
+                "campaign_summary",
+                "video_ad_concepts",
+                "scoring_report",
+                "media_production_notes",
+                "launch_plan",
+                "forbidden_claims_check",
             ],
-            "script_required_fields": ["10秒脚本", "15秒脚本", "30秒脚本"],
+            "concept_required_fields": self._concept_required_keys(),
         }
         result = self._request_json(
-            "你是海外广告素材生成助手。输出必须是 JSON。字段名可用中文；正式素材内容必须按 language 输出；后台合规提醒可以中文。",
+            (
+                "你是海外广告素材生成助手。输出必须是 JSON。字段名必须稳定。"
+                "正式广告脚本、字幕、旁白、广告文案、视频 Prompt 必须按 language 输出；"
+                "后台评分、合规说明和风险说明可以中文。"
+                "正常生成时必须返回 campaign_summary、video_ad_concepts、scoring_report、"
+                "media_production_notes、launch_plan、forbidden_claims_check。"
+                "video_ad_concepts 必须正好 5 套。"
+            ),
             payload,
         )
-        self._require_keys(
-            result,
-            ("素材方向", "脚本", "旁白", "字幕", "分镜", "Runway Prompt", "HeyGen Prompt", "ElevenLabs Prompt", "Facebook广告文案", "TikTok广告文案", "合规提醒"),
-            "素材内容",
-        )
-        self._require_keys(result["脚本"], ("10秒脚本", "15秒脚本", "30秒脚本"), "脚本")
-        return result
+        return self._validate_generation_payload(result)
 
     def evaluate_generation(self, product, demand, generation, audit):
         payload = {
@@ -942,11 +950,14 @@ class OpenAIProvider(MockAIProvider):
 
     def _request_json(self, instruction, payload):
         prompt = f"{instruction}\n\n输入 JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}"
-        response = self.client.responses.create(
-            model=self.model,
-            input=prompt,
-            text={"format": self._json_text_format()},
-        )
+        try:
+            response = self.client.responses.create(
+                model=self.model,
+                input=prompt,
+                text={"format": self._json_text_format()},
+            )
+        except Exception as exc:
+            raise ProviderResponseError(f"OpenAI API call failed: {exc}") from exc
         text = self._response_text(response)
         return self._parse_json(text)
 
@@ -954,18 +965,44 @@ class OpenAIProvider(MockAIProvider):
         return {
             "type": "json_schema",
             "name": "content_factory_json",
-            "schema": {
-                "type": "object",
-                "additionalProperties": True,
-            },
+            "schema": self._json_schema(),
             "strict": False,
+        }
+
+    def _json_schema(self):
+        return {
+            "type": "object",
+            "additionalProperties": True,
+            "properties": {
+                "campaign_summary": {"type": "object", "additionalProperties": True},
+                "video_ad_concepts": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": True,
+                        "properties": {key: {} for key in self._concept_required_keys()},
+                    },
+                },
+                "scoring_report": {"type": "object", "additionalProperties": True},
+                "media_production_notes": {"type": "object", "additionalProperties": True},
+                "launch_plan": {"type": "object", "additionalProperties": True},
+                "forbidden_claims_check": {"type": "object", "additionalProperties": True},
+                "平台": {"type": "string"},
+                "国家": {"type": "string"},
+                "人群": {"type": "string"},
+                "场景": {"type": "string"},
+                "目标": {"type": "string"},
+                "时长": {"type": "string"},
+                "输出物": {"type": "array"},
+                "缺失信息": {"type": "array"},
+            },
         }
 
     def _response_text(self, response):
         if isinstance(response, str):
             return response
         output_text = getattr(response, "output_text", None)
-        if output_text:
+        if output_text is not None:
             return output_text
         try:
             return response.output[0].content[0].text
@@ -974,6 +1011,8 @@ class OpenAIProvider(MockAIProvider):
 
     def _parse_json(self, text):
         candidate = (text or "").strip()
+        if not candidate:
+            raise ProviderResponseError("OpenAI provider returned empty content.")
         fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", candidate, re.DOTALL)
         if fenced:
             candidate = fenced.group(1).strip()
@@ -992,6 +1031,47 @@ class OpenAIProvider(MockAIProvider):
         if missing:
             raise ProviderResponseError(f"{label} JSON missing required fields: {', '.join(missing)}")
         return value
+
+    def _validate_generation_payload(self, result):
+        self._require_keys(
+            result,
+            (
+                "campaign_summary",
+                "video_ad_concepts",
+                "scoring_report",
+                "media_production_notes",
+                "launch_plan",
+                "forbidden_claims_check",
+            ),
+            "素材内容",
+        )
+        concepts = result["video_ad_concepts"]
+        if not isinstance(concepts, list):
+            raise ProviderResponseError("素材内容 JSON field video_ad_concepts must be an array.")
+        if len(concepts) != 5:
+            raise ProviderResponseError("素材内容 JSON field video_ad_concepts must contain exactly 5 concepts.")
+        for index, concept in enumerate(concepts):
+            self._require_keys(concept, self._concept_required_keys(), f"video_ad_concepts[{index}]")
+        return result
+
+    def _concept_required_keys(self):
+        return (
+            "concept_id",
+            "concept_name",
+            "target_angle",
+            "hook",
+            "scene_breakdown",
+            "15s_script",
+            "voiceover",
+            "captions",
+            "visual_style",
+            "runway_prompt",
+            "elevenlabs_prompt",
+            "facebook_primary_text",
+            "facebook_headline",
+            "facebook_description",
+            "compliance_notes",
+        )
 
     def _language_instruction(self, language):
         normalized = self._normalize_language(language)
