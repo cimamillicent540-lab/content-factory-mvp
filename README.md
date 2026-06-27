@@ -194,6 +194,18 @@ http://127.0.0.1:8000/
 
 Raw JSON 仍然保留在页面底部，方便调试、对接和复核完整结构。
 
+## Generation History
+
+本地 Web UI 会把生成结果保存到 SQLite。打开 `/history` 可以查看最近的本地 generation 记录，包括 GENERATED 素材包和 BLOCKED 红线阻断记录。
+
+列表页会展示 generation id、状态、创建时间、行业、产品、平台、国家、语言、素材概念数量和是否 BLOCKED。每条记录都提供 View 链接进入详情页。
+
+GENERATED 详情页会展示可复制的 `Creative Brief Markdown`、`Copy Full Brief` 按钮、素材概念摘要和 Raw JSON，方便复用给素材团队、media buyer 或客户。
+
+BLOCKED 详情页只展示阻断原因、risks、risk_explanation、safer_alternatives、next_actions 和 Raw JSON，不生成 Creative Brief，避免把未通过红线审核的内容误作为交付素材。
+
+这是本地 MVP history，用于单机演示、复盘和交付辅助，不是多用户 SaaS 存储，也没有登录、权限隔离或云端同步。
+
 ## 本地 Web Demo
 
 进入项目目录：
