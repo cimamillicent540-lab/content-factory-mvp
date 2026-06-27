@@ -206,6 +206,16 @@ BLOCKED 详情页只展示阻断原因、risks、risk_explanation、safer_altern
 
 这是本地 MVP history，用于单机演示、复盘和交付辅助，不是多用户 SaaS 存储，也没有登录、权限隔离或云端同步。
 
+## Product Profiles
+
+Product profiles provide reusable client/product context for local generation. The first MVP profile is `spikex_brazil`, which fills Spikex product, industry, country, language, audience, selling points, campaign rules, forbidden claims and product facts.
+
+On the Web UI home page, use `Use Spikex Brazil Profile` to fill the existing generation form without auto-submitting it. The original `Spikex Brazil Demo`, `BLOCKED Risk Demo` and `Clear Form` buttons remain available.
+
+Profiles help ground generation in reusable product facts, reduce manual input, and improve Creative Brief quality. When a profile includes `product_facts`, the facts are passed into the generation request, included in OpenAIProvider prompts as factual grounding, saved with the local generation record, and shown in Creative Brief Markdown under `Product Facts`.
+
+This is local static profile storage for MVP demos and repeatable client briefs. It is not a multi-user SaaS CRM, does not provide login, permissions, cloud sync, or account-level profile management.
+
 ## 本地 Web Demo
 
 进入项目目录：

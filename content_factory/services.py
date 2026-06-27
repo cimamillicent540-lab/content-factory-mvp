@@ -8,6 +8,8 @@ def run_content_pipeline(conn, provider, request):
     product_id = _create_product(conn, request)
     product = _row_to_dict(fetch_one(conn, "SELECT * FROM products WHERE id = ?", (product_id,)))
     product["audience"] = request.get("目标人群", "")
+    product["product_facts"] = request.get("product_facts", [])
+    product["profile_id"] = request.get("profile_id", "")
 
     raw_demand = request.get("需求") or _build_raw_demand(request)
     structured = provider.structure_demand(raw_demand, product)
@@ -24,7 +26,7 @@ def run_content_pipeline(conn, provider, request):
             "missing_info": dumps_json(structured.get("缺失信息", [])),
         },
     )
-    demand = {"id": demand_id, "raw_input": raw_demand, "structured": structured}
+    demand = {"id": demand_id, "raw_input": raw_demand, "structured": structured, "product_facts": request.get("product_facts", [])}
 
     materials = _create_materials(conn, product_id, request.get("素材", []))
     audit = provider.audit_materials(product, demand, materials)
@@ -91,6 +93,7 @@ def get_generation_result(conn, generation_id):
         return None
 
     product = _row_to_dict(fetch_one(conn, "SELECT * FROM products WHERE id = ?", (generation_row["product_id"],)))
+    _attach_profile_context(product)
     demand_row = fetch_one(conn, "SELECT * FROM demand_intakes WHERE id = ?", (generation_row["demand_id"],))
     audit_row = fetch_one(conn, "SELECT * FROM material_audits WHERE id = ?", (generation_row["audit_id"],))
     evaluation_row = fetch_one(
@@ -156,6 +159,15 @@ def record_performance_feedback(conn, provider, generation_id, metrics):
 
 
 def _create_product(conn, request):
+    notes = request.get("备注", "")
+    if request.get("product_facts") or request.get("profile_id"):
+        notes = dumps_json(
+            {
+                "备注": notes,
+                "profile_id": request.get("profile_id", ""),
+                "product_facts": request.get("product_facts", []),
+            }
+        )
     return insert_record(
         conn,
         "products",
@@ -169,7 +181,7 @@ def _create_product(conn, request):
             "campaign_rules": request.get("活动规则", ""),
             "forbidden_claims": request.get("限制词", ""),
             "compliance_redlines": request.get("合规红线", "必须使用真实logo、真实界面、真实活动规则"),
-            "notes": request.get("备注", ""),
+            "notes": notes,
         },
     )
 
@@ -214,6 +226,20 @@ def _build_raw_demand(request):
 
 def _row_to_dict(row):
     return dict(row) if row is not None else None
+
+
+def _attach_profile_context(product):
+    if not product:
+        return product
+    notes = loads_json(product.get("notes"), None)
+    if isinstance(notes, dict):
+        product["profile_id"] = notes.get("profile_id", "")
+        product["product_facts"] = notes.get("product_facts", [])
+        product["notes"] = notes.get("备注", "")
+    else:
+        product["profile_id"] = ""
+        product["product_facts"] = []
+    return product
 
 
 def _performance_metrics(row):

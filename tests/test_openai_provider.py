@@ -81,6 +81,39 @@ class OpenAIProviderTests(unittest.TestCase):
         self.assertIn("no guaranteed profit visuals", prompt)
         self.assertIn("forbidden_claims and campaign_rules are compliance references", prompt)
 
+    def test_product_facts_are_included_in_generation_prompt(self):
+        client = FakeClient(self._generation_payload())
+        provider = OpenAIProvider(api_key="test-key", model="gpt-test", client=client)
+
+        provider.generate_content(
+            {
+                "name": "Spikex",
+                "category": "crypto exchange",
+                "selling_points": "AI copy trading, crypto trading",
+                "product_facts": [
+                    "Spikex is positioned as a trading platform",
+                    "Do not claim guaranteed results",
+                ],
+            },
+            {
+                "raw_input": "Facebook Brazil 15s",
+                "structured": {"语言": "pt-BR", "平台": "Facebook", "国家": "Brazil"},
+                "product_facts": ["The product may include AI copy trading messaging"],
+            },
+            [],
+            [],
+            {"status": "PASS"},
+        )
+
+        prompt = client.calls[-1]["input"]
+        self.assertIn("Use product_facts as factual grounding", prompt)
+        self.assertIn("Do not invent unsupported product features", prompt)
+        self.assertIn("Do not copy campaign_rules directly into ad scripts", prompt)
+        self.assertIn("Do not make profit promises", prompt)
+        self.assertIn("Formal creative fields must follow requested language", prompt)
+        self.assertIn("Spikex is positioned as a trading platform", prompt)
+        self.assertIn("The product may include AI copy trading messaging", prompt)
+
     def test_generate_content_parses_required_json_fields(self):
         client = FakeClient(self._generation_payload())
         provider = OpenAIProvider(api_key="test-key", model="gpt-test", client=client)

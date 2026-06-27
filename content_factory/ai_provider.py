@@ -994,11 +994,14 @@ class OpenAIProvider(MockAIProvider):
             }
         language = demand.get("structured", {}).get("语言", "zh")
         industry_template = detect_industry_template(product, demand)
+        product_facts = self._product_facts(product, demand)
         payload = {
             "language": language,
             "language_instruction": self._language_instruction(language),
             "industry_template": industry_template,
             "industry_template_guidance": template_guidance_text(industry_template),
+            "product_facts": product_facts,
+            "product_facts_guidance": self._product_facts_guidance(product_facts),
             "product": product,
             "demand": demand,
             "materials": materials,
@@ -1020,6 +1023,11 @@ class OpenAIProvider(MockAIProvider):
                 "正式广告脚本、字幕、旁白、广告文案、视频 Prompt 必须按 language 输出；"
                 "后台评分、合规说明和风险说明可以中文。"
                 "如果存在 industry_template_guidance，必须按其中的行业角度、术语、视频风格和禁用表达约束生成。"
+                "如果存在 product_facts，Use product_facts as factual grounding；"
+                "Do not invent unsupported product features；"
+                "Do not copy campaign_rules directly into ad scripts；"
+                "Do not make profit promises；"
+                "Formal creative fields must follow requested language。"
                 "forbidden_claims and campaign_rules are compliance references, not formal ad claims."
                 "正常生成时必须返回 campaign_summary、video_ad_concepts、scoring_report、"
                 "media_production_notes、launch_plan、forbidden_claims_check。"
@@ -1186,6 +1194,27 @@ class OpenAIProvider(MockAIProvider):
             "facebook_headline",
             "facebook_description",
             "compliance_notes",
+        )
+
+    def _product_facts(self, product, demand):
+        facts = []
+        for source in (product.get("product_facts", []), demand.get("product_facts", [])):
+            if isinstance(source, str):
+                source = [source]
+            for fact in source or []:
+                if fact and fact not in facts:
+                    facts.append(fact)
+        return facts
+
+    def _product_facts_guidance(self, product_facts):
+        if not product_facts:
+            return ""
+        return (
+            "Use product_facts as factual grounding. "
+            "Do not invent unsupported product features. "
+            "Do not copy campaign_rules directly into ad scripts. "
+            "Do not make profit promises. "
+            "Formal creative fields must follow requested language."
         )
 
     def _language_instruction(self, language):

@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from content_factory.config import load_settings
 from content_factory.db import connect, init_db, loads_json
+from content_factory.product_profiles import list_product_profiles, profile_to_generation_request
 from content_factory.provider_factory import create_provider
 from content_factory.services import (
     get_generation_result,
@@ -77,6 +78,8 @@ class ContentFactoryAPI:
             {
                 "status": "GENERATED",
                 "generation_id": result["generation_id"],
+                "profile_id": saved["product"].get("profile_id", ""),
+                "product_facts": saved["product"].get("product_facts", []),
                 "结构化需求": saved["demand"]["structured"],
                 "红线审核结果": saved["audit"],
                 "素材内容": saved["generation"],
@@ -283,6 +286,10 @@ def _creative_brief_markdown(saved, generation_id):
     ):
         if line:
             lines.append(line)
+    product_facts = product.get("product_facts", [])
+    if product_facts:
+        lines.extend(["", "### Product Facts"])
+        lines.extend(f"- {fact}" for fact in product_facts)
 
     lines.extend(["", "## Creative Concepts"])
     for concept in concepts:
@@ -387,6 +394,7 @@ def _generated_history_detail_html(generation_id, saved, created_at):
         "generation_id": generation_id,
         "created_at": created_at,
         "product": saved.get("product", {}),
+        "product_facts": saved.get("product", {}).get("product_facts", []),
         "结构化需求": saved.get("demand", {}).get("structured", {}),
         "红线审核结果": saved.get("audit", {}),
         "素材内容": saved.get("generation", {}),
@@ -487,6 +495,10 @@ def _copy_script():
 
 
 def _homepage_html():
+    profile_requests = {
+        profile["profile_id"]: profile_to_generation_request(profile["profile_id"])
+        for profile in list_product_profiles()
+    }
     return """<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -589,6 +601,10 @@ def _homepage_html():
     <h1>Content Factory MVP</h1>
     <p>Overseas Ad Creative Generator</p>
     <p hidden>海外投流素材内容工厂</p>
+    <section class="section">
+      <h2>Product Profiles</h2>
+      <button type="button" onclick="fillProfile('spikex_brazil')">Use Spikex Brazil Profile</button>
+    </section>
     <div class="demo-actions">
       <button type="button" onclick="fillDemo('spikex')">Spikex Brazil Demo</button>
       <button type="button" onclick="fillDemo('blocked')">BLOCKED Risk Demo</button>
@@ -631,6 +647,7 @@ def _homepage_html():
       <label class="wide">自定义需求 demand
         <textarea name="demand" placeholder="留空则根据字段自动生成需求">Generate 5 short video ad concepts with hooks, scripts, voiceover, captions and Runway prompts</textarea>
       </label>
+      <input type="hidden" name="profile_id" value="">
       <div class="wide">
         <button type="submit">生成素材卡片</button>
       </div>
@@ -648,6 +665,8 @@ def _homepage_html():
     const copyBox = (value) => `<textarea class="copy-box" readonly>${escapeHtml(value || '')}</textarea>`;
     const briefLine = (label, value) => value || value === 0 || value === false ? `- ${label}: ${formatBriefValue(value)}` : '';
     const formatBriefValue = (value) => Array.isArray(value) ? value.join(' / ') : String(value ?? '');
+    const productProfiles = __PRODUCT_PROFILE_REQUESTS__;
+    let activeProductFacts = [];
     const demos = {
       spikex: {
         industry: 'crypto exchange',
@@ -680,9 +699,37 @@ def _homepage_html():
     };
 
     function fillDemo(name) {
+      activeProductFacts = [];
       Object.entries(demos[name]).forEach(([key, value]) => {
         if (form[key]) form[key].value = value;
       });
+      if (form.profile_id) form.profile_id.value = '';
+      statusBox.className = 'status';
+      statusBox.textContent = '等待生成';
+    }
+
+    function fillProfile(profileId) {
+      const profile = productProfiles[profileId];
+      if (!profile) return;
+      const mapping = {
+        "行业": "industry",
+        "产品": "product",
+        "投放平台": "platform",
+        "国家": "country",
+        "语言": "language",
+        "目标人群": "audience",
+        "卖点": "selling_points",
+        "活动规则": "campaign_rules",
+        "限制词": "forbidden_claims",
+        "需求": "demand"
+      };
+      Object.entries(mapping).forEach(([source, target]) => {
+        if (form[target]) form[target].value = profile[source] || '';
+      });
+      if (form.restrictions) form.restrictions.value = profile["限制词"] || '';
+      if (form.duration) form.duration.value = '15';
+      if (form.profile_id) form.profile_id.value = profile.profile_id || profileId;
+      activeProductFacts = profile.product_facts || [];
       statusBox.className = 'status';
       statusBox.textContent = '等待生成';
     }
@@ -691,6 +738,7 @@ def _homepage_html():
       Array.from(form.elements).forEach((element) => {
         if (element.name) element.value = '';
       });
+      activeProductFacts = [];
       statusBox.className = 'status';
       statusBox.textContent = '等待生成';
       output.textContent = '生成结果会显示在这里。';
@@ -710,6 +758,8 @@ def _homepage_html():
         "卖点": form.selling_points.value,
         "活动规则": form.campaign_rules.value,
         "限制词": form.forbidden_claims.value || form.restrictions.value,
+        "profile_id": form.profile_id.value,
+        "product_facts": activeProductFacts,
         // legacy payload shape: "限制词": form.restrictions.value
         "需求": form.demand.value || `给${form.platform.value}${form.country.value}${form.audience.value}做一条${form.duration.value}注册转化素材`,
         "素材": [
@@ -784,6 +834,10 @@ def _homepage_html():
         briefLine('selling points', summary["核心卖点"]),
         briefLine('campaign rules summary', form.campaign_rules.value)
       ].filter(Boolean).forEach((line) => lines.push(line));
+      if (Array.isArray(result.product_facts) && result.product_facts.length) {
+        lines.push('', '### Product Facts');
+        result.product_facts.forEach((fact) => lines.push(`- ${fact}`));
+      }
 
       lines.push('', '## Creative Concepts');
       concepts.forEach((concept) => {
@@ -951,7 +1005,7 @@ def _homepage_html():
     }
   </script>
 </body>
-</html>"""
+</html>""".replace("__PRODUCT_PROFILE_REQUESTS__", json.dumps(profile_requests, ensure_ascii=False))
 
 
 if __name__ == "__main__":
