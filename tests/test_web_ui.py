@@ -86,13 +86,43 @@ class WebUiTests(unittest.TestCase):
         self.assertIn("forbidden_claims_check", body)
         self.assertIn("JSON.stringify(result, null, 2)", body)
 
+    def test_homepage_renders_copyable_creative_brief_markdown_for_generated_results(self):
+        _status, _headers, body = self.app.handle("GET", "/")
+        generated_segment = body[body.index("function renderGenerated") : body.index("function renderStatus")]
+
+        self.assertIn("Creative Brief Markdown", generated_segment)
+        self.assertIn("Copy Full Brief", generated_segment)
+        self.assertIn("renderCreativeBriefMarkdown(content, result)", generated_segment)
+        self.assertIn("brief-copy-box", body)
+        self.assertIn("copyFullBrief", body)
+
+    def test_creative_brief_markdown_includes_delivery_fields(self):
+        _status, _headers, body = self.app.handle("GET", "/")
+
+        self.assertIn("# Creative Brief", body)
+        self.assertIn("## Campaign Summary", body)
+        self.assertIn("## Creative Concepts", body)
+        self.assertIn("## Scoring Report", body)
+        self.assertIn("## Media Production Notes", body)
+        self.assertIn("## Launch Plan", body)
+        self.assertIn("## Forbidden Claims Check", body)
+        self.assertIn("concepts.forEach", body)
+        self.assertIn("scene_breakdown", body)
+        self.assertIn("runway_prompt", body)
+        self.assertIn("elevenlabs_prompt", body)
+        self.assertIn("facebook_primary_text", body)
+        self.assertIn("facebook_headline", body)
+        self.assertIn("facebook_description", body)
+
     def test_homepage_renders_blocked_state_without_creative_cards(self):
         _status, _headers, body = self.app.handle("GET", "/")
+        blocked_segment = body[body.index("function renderBlocked") : body.index("function renderRawJson")]
 
         self.assertIn("renderBlocked", body)
         self.assertIn("阻断原因", body)
         self.assertIn("替代表达建议", body)
         self.assertIn("BLOCKED 状态不展示素材卡片", body)
+        self.assertNotIn("Creative Brief Markdown", blocked_segment)
 
     def test_readme_documents_local_web_demo(self):
         readme = Path("README.md").read_text()

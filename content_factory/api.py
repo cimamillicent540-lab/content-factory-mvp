@@ -258,6 +258,7 @@ def _homepage_html():
     .creative-card header { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
     .pill { border-radius: 999px; background: #e0eaff; color: #1849a9; padding: 4px 9px; font-weight: 800; font-size: 12px; }
     textarea.copy-box { min-height: 96px; margin: 8px 0 12px; background: #101828; color: #e6edf7; border-color: #101828; }
+    textarea.brief-copy-box { min-height: 420px; margin-top: 8px; background: #101828; color: #e6edf7; border-color: #101828; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     .danger { border-color: #f2b8b5; background: #fff7f6; }
     ul { margin: 8px 0 0; padding-left: 20px; }
     details { margin-top: 18px; }
@@ -330,6 +331,8 @@ def _homepage_html():
     const field = (label, value) => `<div class="field"><b>${escapeHtml(label)}</b><div>${escapeHtml(value || '')}</div></div>`;
     const list = (items) => Array.isArray(items) ? `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>` : `<p>${escapeHtml(items || '')}</p>`;
     const copyBox = (value) => `<textarea class="copy-box" readonly>${escapeHtml(value || '')}</textarea>`;
+    const briefLine = (label, value) => value || value === 0 || value === false ? `- ${label}: ${formatBriefValue(value)}` : '';
+    const formatBriefValue = (value) => Array.isArray(value) ? value.join(' / ') : String(value ?? '');
     const demos = {
       spikex: {
         industry: 'crypto exchange',
@@ -418,6 +421,7 @@ def _homepage_html():
       const content = result["素材内容"] || {};
       const summary = content.campaign_summary || {};
       const concepts = content.video_ad_concepts || [];
+      const creativeBrief = renderCreativeBriefMarkdown(content, result);
       statusBox.className = 'status generated';
       statusBox.textContent = `GENERATED generation_id=${result.generation_id} 素材内容`;
       output.innerHTML = `
@@ -429,8 +433,101 @@ def _homepage_html():
         <section class="section"><h2>制作建议区</h2>${renderKeyValues(content.media_production_notes || {})}</section>
         <section class="section"><h2>投放计划区 launch_plan</h2>${renderLaunchPlan(content.launch_plan || {})}</section>
         <section class="section"><h2>红线检查区 forbidden_claims_check</h2>${renderForbiddenCheck(content.forbidden_claims_check || {})}</section>
+        <section class="section"><h2>Creative Brief Markdown</h2><button type="button" onclick="copyFullBrief()">Copy Full Brief</button><textarea id="creative-brief-markdown" class="brief-copy-box" readonly>${escapeHtml(creativeBrief)}</textarea></section>
         ${renderRawJson(result)}
       `;
+    }
+
+    async function copyFullBrief() {
+      const target = document.getElementById('creative-brief-markdown');
+      if (!target) return;
+      target.select();
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(target.value);
+      } else {
+        document.execCommand('copy');
+      }
+    }
+
+    function renderCreativeBriefMarkdown(content, result) {
+      const summary = content.campaign_summary || {};
+      const concepts = content.video_ad_concepts || [];
+      const report = content.scoring_report || {};
+      const notes = content.media_production_notes || {};
+      const launchPlan = content.launch_plan || {};
+      const forbiddenCheck = content.forbidden_claims_check || {};
+      const lines = ['# Creative Brief', '', '## Campaign Summary'];
+      [
+        briefLine('generation_id', result.generation_id),
+        briefLine('product', summary["产品"]),
+        briefLine('industry', form.industry.value),
+        briefLine('platform', summary["平台"]),
+        briefLine('country', summary["国家"]),
+        briefLine('language', summary["投放语言"]),
+        briefLine('audience', summary["目标人群"]),
+        briefLine('selling points', summary["核心卖点"]),
+        briefLine('campaign rules summary', form.campaign_rules.value)
+      ].filter(Boolean).forEach((line) => lines.push(line));
+
+      lines.push('', '## Creative Concepts');
+      concepts.forEach((concept) => {
+        lines.push('', `### ${formatBriefValue(concept.concept_id)} ${formatBriefValue(concept.concept_name)}`.trim());
+        [
+          'target_angle',
+          'hook',
+          'scene_breakdown',
+          '15s_script',
+          'voiceover',
+          'captions',
+          'visual_style',
+          'runway_prompt',
+          'elevenlabs_prompt',
+          'facebook_primary_text',
+          'facebook_headline',
+          'facebook_description',
+          'compliance_notes'
+        ].forEach((key) => {
+          const line = briefLine(key, concept[key]);
+          if (line) lines.push(line);
+        });
+      });
+
+      lines.push('', '## Scoring Report');
+      [
+        'total_score',
+        'hook_score',
+        'clarity_score',
+        'compliance_score',
+        'localization_score',
+        'conversion_potential_score',
+        'improvement_suggestions'
+      ].forEach((key) => {
+        const line = briefLine(key, report[key]);
+        if (line) lines.push(line);
+      });
+
+      lines.push('', '## Media Production Notes');
+      Object.entries(notes).forEach(([key, value]) => {
+        const line = briefLine(key, value);
+        if (line) lines.push(line);
+      });
+
+      lines.push('', '## Launch Plan');
+      Object.entries(launchPlan).forEach(([key, value]) => {
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+          lines.push(`- ${key}: ${Object.entries(value).map(([innerKey, innerValue]) => `${innerKey}: ${formatBriefValue(innerValue)}`).join(' / ')}`);
+        } else {
+          const line = briefLine(key, value);
+          if (line) lines.push(line);
+        }
+      });
+
+      lines.push('', '## Forbidden Claims Check');
+      Object.entries(forbiddenCheck).forEach(([key, value]) => {
+        const line = briefLine(key, value);
+        if (line) lines.push(line);
+      });
+      return lines.join('\\n');
     }
 
     function renderStatus(result, summary) {
