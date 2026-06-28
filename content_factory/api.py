@@ -11,6 +11,7 @@ from content_factory.next_round_recommendations import (
     build_next_round_recommendations,
     next_round_plan_markdown,
 )
+from content_factory.next_round_brief_request import build_next_round_brief_request
 from content_factory.performance_reports import (
     get_performance_report,
     list_performance_reports,
@@ -750,6 +751,7 @@ def _performance_report_detail_html(report):
     results = _performance_results_html(report.get("aggregated", {}), report.get("summary", {}), None)
     next_round = build_next_round_recommendations(report)
     next_round_markdown = next_round_plan_markdown(next_round)
+    brief_request = build_next_round_brief_request(report, next_round)
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8"><title>Performance Report Detail</title>{_history_style()}</head>
@@ -760,6 +762,7 @@ def _performance_report_detail_html(report):
   <p>created_at: {_escape(report.get("created_at"))}</p>
   {results}
   {_next_round_recommendations_html(next_round, next_round_markdown)}
+  {_next_round_brief_request_html(brief_request)}
   <section>
     <h2>Raw CSV</h2>
     <details open><summary>Raw CSV Preview</summary><pre>{_escape(report.get("raw_csv_preview", ""))}</pre></details>
@@ -777,6 +780,16 @@ def _performance_report_detail_html(report):
     }}
     async function copyNextRoundPlan() {{
       const target = document.getElementById('next-round-plan-markdown');
+      if (!target) return;
+      target.select();
+      if (navigator.clipboard && navigator.clipboard.writeText) {{
+        await navigator.clipboard.writeText(target.value);
+      }} else {{
+        document.execCommand('copy');
+      }}
+    }}
+    async function copyNextRoundRequest() {{
+      const target = document.getElementById('next-round-request-markdown');
       if (!target) return;
       target.select();
       if (navigator.clipboard && navigator.clipboard.writeText) {{
@@ -832,6 +845,21 @@ def _recommendation_group_html(title, items):
             </article>"""
         )
     return f"<h3>{_escape(title)}</h3>{''.join(cards)}"
+
+
+def _next_round_brief_request_html(brief_request):
+    structured = brief_request.get("structured", {})
+    return f"""<section>
+    <h2>Next Round Creative Brief Request</h2>
+    <p>This request is for internal media buyers and creative producers. It does not generate new creatives automatically.</p>
+    <div class="grid">
+      {_kv_card("High priority actions", len(structured.get("priority_actions", {}).get("High", [])))}
+      {_kv_card("Generation requests", len(structured.get("generation_requests", [])))}
+      {_kv_card("Suggested Naming", ", ".join(structured.get("suggested_naming", [])[:3]))}
+    </div>
+    <button type="button" onclick="copyNextRoundRequest()">Copy Next Round Request</button>
+    <textarea id="next-round-request-markdown" class="brief-copy-box" readonly>{_escape(brief_request.get("markdown", ""))}</textarea>
+  </section>"""
 
 
 def _html_list(items):

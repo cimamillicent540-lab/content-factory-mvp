@@ -141,6 +141,21 @@ class WebUiTests(unittest.TestCase):
         self.assertIn("next-round-plan-markdown", body)
         self.assertIn("Performance Summary", body)
 
+    def test_performance_history_detail_shows_next_round_brief_request(self):
+        _status, _headers, body = self.app.handle("POST", "/performance", {"csv": self._sample_performance_csv()})
+        report_id = self._extract_report_id(body)
+
+        status, _headers, body = self.app.handle("GET", f"/performance/history/{report_id}")
+
+        self.assertEqual(status, 200)
+        self.assertIn("Next Round Creative Recommendations", body)
+        self.assertIn("Next Round Creative Brief Request", body)
+        self.assertIn("Copy Next Round Request", body)
+        self.assertIn("next-round-request-markdown", body)
+        self.assertIn("Suggested Naming", body)
+        self.assertIn("-V2A", body)
+        self.assertNotIn("Generate Next Round Creatives", body)
+
     def test_performance_history_detail_shows_unmatched_rows_when_present(self):
         csv_text = """ad_name,spend,impressions,clicks
 SPK-BR-FB-20260628-C001_ai_copy_trading_v1,30,5000,80
