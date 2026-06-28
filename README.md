@@ -266,6 +266,14 @@ The system groups creatives into scale candidates, keep testing, needs recut, co
 
 This V1 only recommends what to test next. It does not automatically generate new creatives, does not call MockAIProvider or OpenAIProvider for new assets, and does not promise ROI, CPA improvement, deposits, or performance outcomes.
 
+## Next Round Creative Brief Request
+
+Saved Performance Reports can also produce a copyable `Next Round Creative Brief Request` on `/performance/history/{report_id}`. This is for internal media buyers and creative producers before the next production round.
+
+The request converts performance recommendations into a production-ready brief with priority actions, next-round generation requests, do-not-repeat notes, internal production notes, and suggested variant naming such as `SPK-BR-FB-20260628-C001-V2A`.
+
+This V1 does not automatically generate new creatives, does not call OpenAI or any ad platform API, and does not promise ROI or performance outcomes. It is a structured internal request that can be copied into Notion, Feishu, Slack, or a production handoff.
+
 ## 本地 Web Demo
 
 进入项目目录：
