@@ -7,6 +7,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from content_factory.config import load_settings
 from content_factory.creative_workflow import attach_creative_ids, build_media_buyer_launch_brief
 from content_factory.db import connect, init_db, loads_json
+from content_factory.next_round_recommendations import (
+    build_next_round_recommendations,
+    next_round_plan_markdown,
+)
 from content_factory.performance_reports import (
     get_performance_report,
     list_performance_reports,
@@ -744,6 +748,8 @@ def _performance_history_html(reports):
 
 def _performance_report_detail_html(report):
     results = _performance_results_html(report.get("aggregated", {}), report.get("summary", {}), None)
+    next_round = build_next_round_recommendations(report)
+    next_round_markdown = next_round_plan_markdown(next_round)
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8"><title>Performance Report Detail</title>{_history_style()}</head>
@@ -753,6 +759,7 @@ def _performance_report_detail_html(report):
   <p>report_id: {_escape(report.get("report_id"))}</p>
   <p>created_at: {_escape(report.get("created_at"))}</p>
   {results}
+  {_next_round_recommendations_html(next_round, next_round_markdown)}
   <section>
     <h2>Raw CSV</h2>
     <details open><summary>Raw CSV Preview</summary><pre>{_escape(report.get("raw_csv_preview", ""))}</pre></details>
@@ -768,8 +775,69 @@ def _performance_report_detail_html(report):
         document.execCommand('copy');
       }}
     }}
+    async function copyNextRoundPlan() {{
+      const target = document.getElementById('next-round-plan-markdown');
+      if (!target) return;
+      target.select();
+      if (navigator.clipboard && navigator.clipboard.writeText) {{
+        await navigator.clipboard.writeText(target.value);
+      }} else {{
+        document.execCommand('copy');
+      }}
+    }}
   </script>
 </main></body></html>"""
+
+
+def _next_round_recommendations_html(recommendations, markdown):
+    return f"""<section>
+    <h2>Next Round Creative Recommendations</h2>
+    <h3>Summary</h3>
+    <div class="grid">
+      {_kv_card("report_id", recommendations.get("summary", {}).get("report_id"))}
+      {_kv_card("creative_count", recommendations.get("summary", {}).get("creative_count"))}
+      {_kv_card("planning note", recommendations.get("summary", {}).get("message"))}
+    </div>
+    {_recommendation_group_html("Scale Candidates", recommendations.get("scale_candidates", []))}
+    {_recommendation_group_html("Keep Testing", recommendations.get("keep_testing", []))}
+    {_recommendation_group_html("Needs Recut", recommendations.get("needs_recut", []))}
+    {_recommendation_group_html("Copy / CTA Tests", recommendations.get("copy_or_cta_tests", []))}
+    {_recommendation_group_html("Landing Page Checks", recommendations.get("landing_page_checks", []))}
+    {_recommendation_group_html("Pause", recommendations.get("pause", []))}
+    <h3>Next Round Angles</h3>
+    {_html_list(recommendations.get("next_round_angles", []))}
+    <h3>Creative Brief Requests</h3>
+    <p hidden>creative_brief_requests</p>
+    {_html_list(recommendations.get("creative_brief_requests", []))}
+    <h3>Internal Notes</h3>
+    {_html_list(recommendations.get("internal_notes", []))}
+    <h3>Copy Next Round Plan</h3>
+    <button type="button" onclick="copyNextRoundPlan()">Copy Next Round Plan</button>
+    <textarea id="next-round-plan-markdown" class="brief-copy-box" readonly>{_escape(markdown)}</textarea>
+  </section>"""
+
+
+def _recommendation_group_html(title, items):
+    if not items:
+        return f"<h3>{_escape(title)}</h3><p>None for now.</p>"
+    cards = []
+    for item in items:
+        cards.append(
+            f"""<article class="history-card">
+              <h4>{_escape(item.get("creative_id"))} · {_escape(item.get("current_recommendation"))}</h4>
+              <p>priority: {_escape(item.get("priority"))}</p>
+              <p>reason: {_escape(item.get("reason"))}</p>
+              <p>next_action: {_escape(item.get("next_action"))}</p>
+              <p>suggested_variation: {_escape(item.get("suggested_variation"))}</p>
+            </article>"""
+        )
+    return f"<h3>{_escape(title)}</h3>{''.join(cards)}"
+
+
+def _html_list(items):
+    if not items:
+        return "<p>None for now.</p>"
+    return f"<ul>{''.join(f'<li>{_escape(item)}</li>' for item in items)}</ul>"
 
 
 def _performance_report_not_found_html(report_id):

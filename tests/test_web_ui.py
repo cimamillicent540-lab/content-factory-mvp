@@ -120,6 +120,27 @@ class WebUiTests(unittest.TestCase):
         self.assertIn("Raw CSV", body)
         self.assertIn("SPK-BR-FB-20260628-C001", body)
 
+    def test_performance_history_detail_shows_next_round_recommendations(self):
+        _status, _headers, body = self.app.handle("POST", "/performance", {"csv": self._sample_performance_csv()})
+        report_id = self._extract_report_id(body)
+
+        status, _headers, body = self.app.handle("GET", f"/performance/history/{report_id}")
+
+        self.assertEqual(status, 200)
+        self.assertIn("Next Round Creative Recommendations", body)
+        self.assertIn("Scale Candidates", body)
+        self.assertIn("Keep Testing", body)
+        self.assertIn("Needs Recut", body)
+        self.assertIn("Copy / CTA Tests", body)
+        self.assertIn("Landing Page Checks", body)
+        self.assertIn("Pause", body)
+        self.assertIn("Next Round Angles", body)
+        self.assertIn("Creative Brief Requests", body)
+        self.assertIn("creative_brief_requests", body)
+        self.assertIn("Copy Next Round Plan", body)
+        self.assertIn("next-round-plan-markdown", body)
+        self.assertIn("Performance Summary", body)
+
     def test_performance_history_detail_shows_unmatched_rows_when_present(self):
         csv_text = """ad_name,spend,impressions,clicks
 SPK-BR-FB-20260628-C001_ai_copy_trading_v1,30,5000,80
