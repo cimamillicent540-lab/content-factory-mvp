@@ -78,6 +78,69 @@ class WebUiTests(unittest.TestCase):
         self.assertIn("CPA registration", body)
         self.assertIn("Copy Performance Summary", body)
 
+    def test_performance_post_saves_report_and_links_to_saved_detail(self):
+        status, _headers, body = self.app.handle("POST", "/performance", {"csv": self._sample_performance_csv()})
+
+        self.assertEqual(status, 200)
+        self.assertIn("Saved Performance Report", body)
+        self.assertIn("View Saved Report", body)
+        self.assertIn("View Performance History", body)
+        self.assertRegex(body, r"/performance/history/perf-[^\"]+")
+
+    def test_performance_history_page_exists_and_lists_saved_reports(self):
+        self.app.handle("POST", "/performance", {"csv": self._sample_performance_csv()})
+
+        status, headers, body = self.app.handle("GET", "/performance/history")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Content-Type"], "text/html; charset=utf-8")
+        self.assertIn("Performance Reports", body)
+        self.assertIn("perf-", body)
+        self.assertIn("total spend", body)
+        self.assertIn("matched creative count", body)
+        self.assertIn("SCALE_CANDIDATE", body)
+        self.assertIn("NEEDS_RECUT", body)
+        self.assertIn("PAUSE", body)
+        self.assertIn("CHECK_LANDING_PAGE", body)
+        self.assertIn("View Report", body)
+
+    def test_performance_history_detail_shows_saved_report(self):
+        _status, _headers, body = self.app.handle("POST", "/performance", {"csv": self._sample_performance_csv()})
+        report_id = self._extract_report_id(body)
+
+        status, _headers, body = self.app.handle("GET", f"/performance/history/{report_id}")
+
+        self.assertEqual(status, 200)
+        self.assertIn("Performance Report Detail", body)
+        self.assertIn("Summary", body)
+        self.assertIn("Creative Performance Table", body)
+        self.assertIn("Internal Action Notes", body)
+        self.assertIn("Copy Performance Summary", body)
+        self.assertIn("performance-summary-markdown", body)
+        self.assertIn("Raw CSV", body)
+        self.assertIn("SPK-BR-FB-20260628-C001", body)
+
+    def test_performance_history_detail_shows_unmatched_rows_when_present(self):
+        csv_text = """ad_name,spend,impressions,clicks
+SPK-BR-FB-20260628-C001_ai_copy_trading_v1,30,5000,80
+no_id_ad,10,1000,5
+"""
+        _status, _headers, body = self.app.handle("POST", "/performance", {"csv": csv_text})
+        report_id = self._extract_report_id(body)
+
+        status, _headers, body = self.app.handle("GET", f"/performance/history/{report_id}")
+
+        self.assertEqual(status, 200)
+        self.assertIn("Unmatched Rows", body)
+        self.assertIn("No Creative ID found", body)
+
+    def test_performance_history_detail_missing_returns_clear_404(self):
+        status, headers, body = self.app.handle("GET", "/performance/history/perf-missing")
+
+        self.assertEqual(status, 404)
+        self.assertEqual(headers["Content-Type"], "text/html; charset=utf-8")
+        self.assertIn("Performance report not found", body)
+
     def test_performance_post_displays_unmatched_warning(self):
         csv_text = """ad_name,spend,impressions,clicks
 SPK-BR-FB-20260628-C001_ai_copy_trading_v1,30,5000,80
@@ -325,6 +388,11 @@ SPK-BR-FB-20260628-C001,30,5000,80,65,5,1,1200,500,220
 SPK-BR-FB-20260628-C002,25,4500,35,28,1,0,600,180,60
 SPK-BR-FB-20260628-C003,20,3000,70,60,0,0,1000,650,300
 """
+
+    def _extract_report_id(self, body):
+        marker = "/performance/history/"
+        start = body.index(marker) + len(marker)
+        return body[start : body.index('"', start)]
 
     def _profile_request(self):
         request = self._valid_request()

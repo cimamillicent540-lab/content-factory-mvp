@@ -248,6 +248,16 @@ SPK-BR-FB-20260628-C001,30,5000,80,65,5,1,1200,500,220
 SPK-BR-FB-20260628-C002,25,4500,35,28,1,0,600,180,60
 ```
 
+## Saved Performance Reports
+
+Each `/performance` CSV analysis is saved locally as a Performance Report. The result page shows `Saved Performance Report` with links to the saved report detail and the report history.
+
+Open `/performance/history` to review recent saved reports. Each row shows report id, created time, total spend, matched creative count, unmatched row count, and counts for `SCALE_CANDIDATE`, `NEEDS_RECUT`, `PAUSE`, and `CHECK_LANDING_PAGE`.
+
+Open `/performance/history/{report_id}` to view the saved analysis, including Summary, Creative Performance Table, Internal Action Notes, Unmatched Rows, Copy Performance Summary Markdown, and Raw CSV preview.
+
+This feature is for internal media buyers, creative teams, and project review. V1 does not sync with Facebook/TikTok APIs, does not require customer login, and does not provide a customer dashboard. Future versions can link saved performance reports to generated Creative IDs, client weekly reports, and next-round creative generation suggestions.
+
 ## 本地 Web Demo
 
 进入项目目录：
