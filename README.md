@@ -228,7 +228,7 @@ Customers may see exported Creative Briefs, reports, or selected presentation ou
 
 ## Performance CSV Analyzer
 
-The local Web UI includes a `Performance CSV Analyzer` page at `/performance` for internal media buyers and creative teams. It does not call any ad platform API and does not persist performance reports in SQLite; it only analyzes pasted CSV text in the current request.
+The local Web UI includes a `Performance CSV Analyzer` page at `/performance` for internal media buyers and creative teams. It does not call any ad platform API. Each pasted CSV analysis is saved locally as a Performance Report for internal review.
 
 Supported Creative ID matching:
 
@@ -257,6 +257,14 @@ Open `/performance/history` to review recent saved reports. Each row shows repor
 Open `/performance/history/{report_id}` to view the saved analysis, including Summary, Creative Performance Table, Internal Action Notes, Unmatched Rows, Copy Performance Summary Markdown, and Raw CSV preview.
 
 This feature is for internal media buyers, creative teams, and project review. V1 does not sync with Facebook/TikTok APIs, does not require customer login, and does not provide a customer dashboard. Future versions can link saved performance reports to generated Creative IDs, client weekly reports, and next-round creative generation suggestions.
+
+## Next Round Creative Recommendations
+
+Saved Performance Reports can produce `Next Round Creative Recommendations` on `/performance/history/{report_id}`. These recommendations are for internal media buyers, creative teams, editors, and project owners.
+
+The system groups creatives into scale candidates, keep testing, needs recut, copy/CTA tests, landing page checks, and pause. It also produces next-round angles and `creative_brief_requests` that can be copied into Notion, Feishu, Slack, or a client weekly report draft.
+
+This V1 only recommends what to test next. It does not automatically generate new creatives, does not call MockAIProvider or OpenAIProvider for new assets, and does not promise ROI, CPA improvement, deposits, or performance outcomes.
 
 ## 本地 Web Demo
 
