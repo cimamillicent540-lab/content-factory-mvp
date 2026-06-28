@@ -216,6 +216,16 @@ Profiles help ground generation in reusable product facts, reduce manual input, 
 
 This is local static profile storage for MVP demos and repeatable client briefs. It is not a multi-user SaaS CRM, does not provide login, permissions, cloud sync, or account-level profile management.
 
+## Internal Media Buyer Workflow
+
+This tool is primarily for internal media buyers and creative teams, not customer self-service. Internal users can prepare ad creatives, review product facts, export briefs, and hand off launch-ready notes before ads go live.
+
+Creative IDs are derived by the application, not by the LLM. The current format is `{PRODUCT_CODE}-{COUNTRY_CODE}-{PLATFORM_CODE}-{YYYYMMDD}-{CONCEPT_CODE}`, for example `SPK-BR-FB-20260628-C001`. These IDs help track creative concepts across briefs, video file names, ad launches, and performance reports.
+
+Generated results include a `Media Buyer Launch Brief` with campaign setup, a creative launch table, metrics to watch, launch checklist, and decision rules. It is written for internal launch preparation and avoids ROI promises, guaranteed profit claims, or customer-facing performance commitments.
+
+Customers may see exported Creative Briefs, reports, or selected presentation outputs, but internal teams are the primary users of this MVP.
+
 ## 本地 Web Demo
 
 进入项目目录：
