@@ -19,6 +19,7 @@ class DatabaseTests(unittest.TestCase):
             "material_audits",
             "evaluation_reports",
             "ad_performance_logs",
+            "performance_reports",
             "reusable_patterns",
         }
         self.assertTrue(expected.issubset(table_names(conn)))

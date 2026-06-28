@@ -7,10 +7,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from content_factory.config import load_settings
 from content_factory.creative_workflow import attach_creative_ids, build_media_buyer_launch_brief
 from content_factory.db import connect, init_db, loads_json
-from content_factory.performance_analysis import (
-    build_performance_summary,
-    calculate_performance_metrics,
-    parse_performance_csv,
+from content_factory.performance_reports import (
+    get_performance_report,
+    list_performance_reports,
+    save_performance_report,
 )
 from content_factory.product_profiles import list_product_profiles, profile_to_generation_request
 from content_factory.provider_factory import create_provider
@@ -40,6 +40,13 @@ class ContentFactoryAPI:
 
         if method == "POST" and path == "/performance":
             return self._handle_performance(payload or {})
+
+        if method == "GET" and path == "/performance/history":
+            return self._handle_performance_history()
+
+        performance_match = re.fullmatch(r"/performance/history/(perf-[A-Za-z0-9-]+)", path)
+        if method == "GET" and performance_match:
+            return self._handle_performance_report_detail(performance_match.group(1))
 
         if method == "GET" and path == "/history":
             return self._handle_history()
@@ -133,10 +140,18 @@ class ContentFactoryAPI:
 
     def _handle_performance(self, payload):
         csv_text = payload.get("csv") or payload.get("csv_text") or ""
-        rows = parse_performance_csv(csv_text)
-        aggregated = calculate_performance_metrics(rows)
-        summary = build_performance_summary(aggregated)
-        return 200, dict(HTML_HEADERS), _performance_html(csv_text, aggregated, summary)
+        report = save_performance_report(self.conn, csv_text)
+        return 200, dict(HTML_HEADERS), _performance_html(csv_text, report["aggregated"], report["summary"], report)
+
+    def _handle_performance_history(self):
+        reports = list_performance_reports(self.conn)
+        return 200, dict(HTML_HEADERS), _performance_history_html(reports)
+
+    def _handle_performance_report_detail(self, report_id):
+        report = get_performance_report(self.conn, report_id)
+        if report is None:
+            return 404, dict(HTML_HEADERS), _performance_report_not_found_html(report_id)
+        return 200, dict(HTML_HEADERS), _performance_report_detail_html(report)
 
     def _handle_history(self):
         rows = self.conn.execute(
@@ -563,9 +578,9 @@ SPK-BR-FB-20260628-C003,20,3000,70,60,0,0,1000,650,300
 """
 
 
-def _performance_html(csv_text=None, aggregated=None, summary=None):
+def _performance_html(csv_text=None, aggregated=None, summary=None, report=None):
     csv_value = csv_text if csv_text is not None else _sample_performance_csv()
-    results = _performance_results_html(aggregated, summary) if aggregated is not None and summary is not None else ""
+    results = _performance_results_html(aggregated, summary, report) if aggregated is not None and summary is not None else ""
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -620,7 +635,7 @@ def _performance_html(csv_text=None, aggregated=None, summary=None):
 </main></body></html>"""
 
 
-def _performance_results_html(aggregated, summary):
+def _performance_results_html(aggregated, summary, report=None):
     creatives = aggregated.get("creatives", {})
     rows = []
     for creative_id, metrics in creatives.items():
@@ -651,8 +666,10 @@ def _performance_results_html(aggregated, summary):
           <p>No Creative ID found in {len(aggregated.get("unmatched_rows", []))} row(s). Check creative_id, ad_name, campaign_name, or adset_name naming.</p>
           <pre>{_escape(json.dumps(aggregated.get("unmatched_rows", []), ensure_ascii=False, indent=2))}</pre>
         </section>"""
-    summary_markdown = _performance_summary_markdown(summary, creatives)
+    summary_markdown = report.get("summary_markdown") if report else _performance_summary_markdown(summary, creatives)
+    saved_notice = _performance_saved_notice(report) if report else ""
     return f"""
+      {saved_notice}
       <section>
         <h2>Summary</h2>
         <div class="grid">
@@ -684,6 +701,81 @@ def _performance_results_html(aggregated, summary):
         <textarea id="performance-summary-markdown" class="brief-copy-box" readonly>{_escape(summary_markdown)}</textarea>
       </section>
     """
+
+
+def _performance_saved_notice(report):
+    return f"""<section>
+        <h2>Saved Performance Report</h2>
+        <p>report_id: {_escape(report.get("report_id"))}</p>
+        <p>Creative IDs can be matched against generated creative briefs by ID. Full linking can be added later.</p>
+        <a href="/performance/history/{_escape(report.get("report_id"))}">View Saved Report</a>
+        · <a href="/performance/history">View Performance History</a>
+      </section>"""
+
+
+def _performance_history_html(reports):
+    cards = []
+    for report in reports:
+        cards.append(
+            f"""<article class="history-card">
+              <h2>{_escape(report.get("report_id"))}</h2>
+              <p>created_at: {_escape(report.get("created_at"))}</p>
+              <p>total spend: {_format_money(report.get("total_spend"))}</p>
+              <p>matched creative count: {_escape(report.get("matched_creative_count"))}</p>
+              <p>unmatched row count: {_escape(report.get("unmatched_row_count"))}</p>
+              <p>SCALE_CANDIDATE: {_escape(report.get("scale_candidate_count"))}</p>
+              <p>NEEDS_RECUT: {_escape(report.get("needs_recut_count"))}</p>
+              <p>PAUSE: {_escape(report.get("pause_count"))}</p>
+              <p>CHECK_LANDING_PAGE: {_escape(report.get("check_landing_page_count"))}</p>
+              <a href="/performance/history/{_escape(report.get("report_id"))}">View Report</a>
+            </article>"""
+        )
+    body = "\n".join(cards) or "<p>No saved performance reports yet.</p>"
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>Performance Reports</title>{_history_style()}</head>
+<body><main>
+  <nav><a href="/performance">Back to Performance Analyzer</a> · <a href="/">Back to Generator</a></nav>
+  <h1>Performance Reports</h1>
+  <p>Saved local CSV analysis reports for internal media buyer and project review.</p>
+  {body}
+</main></body></html>"""
+
+
+def _performance_report_detail_html(report):
+    results = _performance_results_html(report.get("aggregated", {}), report.get("summary", {}), None)
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>Performance Report Detail</title>{_history_style()}</head>
+<body><main>
+  <nav><a href="/performance/history">Back to Performance History</a> · <a href="/performance">Analyze New CSV</a></nav>
+  <h1>Performance Report Detail</h1>
+  <p>report_id: {_escape(report.get("report_id"))}</p>
+  <p>created_at: {_escape(report.get("created_at"))}</p>
+  {results}
+  <section>
+    <h2>Raw CSV</h2>
+    <details open><summary>Raw CSV Preview</summary><pre>{_escape(report.get("raw_csv_preview", ""))}</pre></details>
+  </section>
+  <script>
+    async function copyPerformanceSummary() {{
+      const target = document.getElementById('performance-summary-markdown');
+      if (!target) return;
+      target.select();
+      if (navigator.clipboard && navigator.clipboard.writeText) {{
+        await navigator.clipboard.writeText(target.value);
+      }} else {{
+        document.execCommand('copy');
+      }}
+    }}
+  </script>
+</main></body></html>"""
+
+
+def _performance_report_not_found_html(report_id):
+    return f"""<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>Performance report not found</title>{_history_style()}</head>
+<body><main><h1>Performance report not found</h1><p>No saved Performance Report for {_escape(report_id)}.</p><a href="/performance/history">Back to Performance History</a></main></body></html>"""
 
 
 def _performance_summary_markdown(summary, creatives):
