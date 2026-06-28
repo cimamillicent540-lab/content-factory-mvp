@@ -106,6 +106,8 @@ class WebUiTests(unittest.TestCase):
         _status, _headers, body = self.app.handle("GET", "/")
 
         self.assertIn("# Creative Brief", body)
+        self.assertIn("creative_id", body)
+        self.assertIn("Creative ID", body)
         self.assertIn("## Campaign Summary", body)
         self.assertIn("## Creative Concepts", body)
         self.assertIn("## Scoring Report", body)
@@ -120,6 +122,19 @@ class WebUiTests(unittest.TestCase):
         self.assertIn("facebook_headline", body)
         self.assertIn("facebook_description", body)
 
+    def test_homepage_renders_media_buyer_launch_brief_for_generated_results(self):
+        _status, _headers, body = self.app.handle("GET", "/")
+        generated_segment = body[body.index("function renderGenerated") : body.index("function renderStatus")]
+
+        self.assertIn("Media Buyer Launch Brief", generated_segment)
+        self.assertIn("Copy Launch Brief", generated_segment)
+        self.assertIn("renderMediaBuyerLaunchBrief", body)
+        self.assertIn("launch-brief-copy-box", body)
+        self.assertIn("copyLaunchBrief", body)
+        self.assertIn("primary metric to watch", body)
+        self.assertIn("Confirm video file name uses creative_id", body)
+        self.assertIn("Decision Rules", body)
+
     def test_homepage_renders_blocked_state_without_creative_cards(self):
         _status, _headers, body = self.app.handle("GET", "/")
         blocked_segment = body[body.index("function renderBlocked") : body.index("function renderRawJson")]
@@ -129,6 +144,8 @@ class WebUiTests(unittest.TestCase):
         self.assertIn("替代表达建议", body)
         self.assertIn("BLOCKED 状态不展示素材卡片", body)
         self.assertNotIn("Creative Brief Markdown", blocked_segment)
+        self.assertNotIn("Creative ID", blocked_segment)
+        self.assertNotIn("Media Buyer Launch Brief", blocked_segment)
 
     def test_history_page_exists_and_lists_generated_records(self):
         _status, _headers, body = self.app.handle("POST", "/generate", self._valid_request())
@@ -171,6 +188,9 @@ class WebUiTests(unittest.TestCase):
         self.assertIn("GENERATED", body)
         self.assertIn("Creative Brief Markdown", body)
         self.assertIn("Copy Full Brief", body)
+        self.assertIn("Creative ID", body)
+        self.assertIn("Media Buyer Launch Brief", body)
+        self.assertIn("Copy Launch Brief", body)
         self.assertIn("# Creative Brief", body)
         self.assertIn("runway_prompt", body)
         self.assertIn("Raw JSON", body)
@@ -207,6 +227,21 @@ class WebUiTests(unittest.TestCase):
         self.assertIn("risk_explanation", body)
         self.assertIn("Raw JSON", body)
         self.assertNotIn("Creative Brief Markdown", body)
+        self.assertNotIn("Creative ID", body)
+        self.assertNotIn("Media Buyer Launch Brief", body)
+
+    def test_generated_result_page_displays_creative_ids_and_launch_brief(self):
+        _status, _headers, body = self.app.handle("POST", "/generate", self._profile_request())
+        generated = json.loads(body)
+
+        status, _headers, detail_body = self.app.handle("GET", f'/history/{generated["generation_id"]}')
+
+        self.assertEqual(status, 200)
+        self.assertIn("SPK-BR-FB-", detail_body)
+        self.assertIn("Creative ID", detail_body)
+        self.assertIn("Media Buyer Launch Brief", detail_body)
+        self.assertIn("primary metric to watch", detail_body)
+        self.assertIn("Decision Rules", detail_body)
 
     def test_history_detail_missing_returns_clear_404(self):
         status, headers, body = self.app.handle("GET", "/history/999999")

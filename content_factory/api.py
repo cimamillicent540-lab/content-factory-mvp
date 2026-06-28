@@ -5,6 +5,7 @@ import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from content_factory.config import load_settings
+from content_factory.creative_workflow import attach_creative_ids, build_media_buyer_launch_brief
 from content_factory.db import connect, init_db, loads_json
 from content_factory.product_profiles import list_product_profiles, profile_to_generation_request
 from content_factory.provider_factory import create_provider
@@ -262,12 +263,18 @@ def _brief_line(label, value):
     return f"- {label}: {_format_brief_value(value)}"
 
 
-def _creative_brief_markdown(saved, generation_id):
+def _creative_brief_markdown(saved, generation_id, created_at=None):
     product = saved.get("product", {})
     demand = saved.get("demand", {}).get("structured", {})
     generation = saved.get("generation", {})
     summary = generation.get("campaign_summary", {})
-    concepts = generation.get("video_ad_concepts", [])
+    concepts = attach_creative_ids(
+        generation.get("video_ad_concepts", []),
+        product.get("name"),
+        summary.get("国家") or product.get("country"),
+        summary.get("平台") or product.get("platform"),
+        created_at,
+    )
     report = generation.get("scoring_report", {})
     notes = generation.get("media_production_notes", {})
     launch_plan = generation.get("launch_plan", {})
@@ -294,7 +301,11 @@ def _creative_brief_markdown(saved, generation_id):
     lines.extend(["", "## Creative Concepts"])
     for concept in concepts:
         lines.extend(["", f"### {_format_brief_value(concept.get('concept_id'))} {_format_brief_value(concept.get('concept_name'))}".strip()])
+        line = _brief_line("Creative ID", concept.get("creative_id"))
+        if line:
+            lines.append(line)
         for key in (
+            "creative_id",
             "target_angle",
             "hook",
             "scene_breakdown",
@@ -386,9 +397,29 @@ def _history_html(rows):
 
 
 def _generated_history_detail_html(generation_id, saved, created_at):
-    brief = _creative_brief_markdown(saved, generation_id)
+    brief = _creative_brief_markdown(saved, generation_id, created_at)
     generation = saved.get("generation", {})
-    concepts = generation.get("video_ad_concepts", [])
+    product = saved.get("product", {})
+    summary = generation.get("campaign_summary", {})
+    concepts = attach_creative_ids(
+        generation.get("video_ad_concepts", []),
+        product.get("name"),
+        summary.get("国家") or product.get("country"),
+        summary.get("平台") or product.get("platform"),
+        created_at,
+    )
+    launch_brief = build_media_buyer_launch_brief(
+        {
+            "product": summary.get("产品") or product.get("name"),
+            "profile_id": product.get("profile_id", ""),
+            "platform": summary.get("平台") or product.get("platform"),
+            "country": summary.get("国家") or product.get("country"),
+            "language": summary.get("投放语言") or saved.get("demand", {}).get("structured", {}).get("语言"),
+            "audience": summary.get("目标人群") or saved.get("demand", {}).get("structured", {}).get("人群"),
+            "campaign_rules": product.get("campaign_rules"),
+        },
+        concepts,
+    )
     raw_payload = {
         "status": "GENERATED",
         "generation_id": generation_id,
@@ -403,6 +434,7 @@ def _generated_history_detail_html(generation_id, saved, created_at):
     }
     concept_cards = "\n".join(
         f"<article class=\"history-card\"><h3>{_escape(concept.get('concept_id'))} {_escape(concept.get('concept_name'))}</h3>"
+        f"<p>Creative ID: {_escape(concept.get('creative_id'))}</p>"
         f"<p>hook: {_escape(concept.get('hook'))}</p>"
         f"<p>runway_prompt: {_escape(concept.get('runway_prompt'))}</p>"
         f"<p>elevenlabs_prompt: {_escape(concept.get('elevenlabs_prompt'))}</p></article>"
@@ -418,6 +450,7 @@ def _generated_history_detail_html(generation_id, saved, created_at):
   <p>generation_id: {_escape(generation_id)}</p>
   <p>created_at: {_escape(created_at)}</p>
   <section><h2>Creative Brief Markdown</h2><button type="button" onclick="copyFullBrief()">Copy Full Brief</button><textarea id="creative-brief-markdown" class="brief-copy-box" readonly>{_escape(brief)}</textarea></section>
+  <section><h2>Media Buyer Launch Brief</h2><button type="button" onclick="copyLaunchBrief()">Copy Launch Brief</button><textarea id="media-buyer-launch-brief" class="brief-copy-box launch-brief-copy-box" readonly>{_escape(launch_brief)}</textarea></section>
   <section><h2>Creative Concepts</h2>{concept_cards}</section>
   <section><h2>Raw JSON</h2><pre>{_escape(json.dumps(raw_payload, ensure_ascii=False, indent=2))}</pre></section>
   <script>{_copy_script()}</script>
@@ -483,6 +516,16 @@ def _copy_script():
     return """
       async function copyFullBrief() {
         const target = document.getElementById('creative-brief-markdown');
+        if (!target) return;
+        target.select();
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(target.value);
+        } else {
+          document.execCommand('copy');
+        }
+      }
+      async function copyLaunchBrief() {
+        const target = document.getElementById('media-buyer-launch-brief');
         if (!target) return;
         target.select();
         if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -665,6 +708,28 @@ def _homepage_html():
     const copyBox = (value) => `<textarea class="copy-box" readonly>${escapeHtml(value || '')}</textarea>`;
     const briefLine = (label, value) => value || value === 0 || value === false ? `- ${label}: ${formatBriefValue(value)}` : '';
     const formatBriefValue = (value) => Array.isArray(value) ? value.join(' / ') : String(value ?? '');
+    const alphaCode = (value, length, fallback) => {
+      const chars = String(value || '').match(/[A-Za-z0-9]/g) || [];
+      return chars.length ? chars.slice(0, length).join('').toUpperCase().padEnd(length, 'X') : fallback;
+    };
+    const productCode = (value) => String(value || '').trim().toLowerCase() === 'spikex' ? 'SPK' : alphaCode(value, 3, 'XXX');
+    const countryCode = (value) => {
+      const normalized = String(value || '').trim().toLowerCase();
+      if (normalized === 'brazil') return 'BR';
+      if (['united states', 'usa', 'us'].includes(normalized)) return 'US';
+      return alphaCode(value, 2, 'XX');
+    };
+    const platformCode = (value) => {
+      const normalized = String(value || '').trim().toLowerCase();
+      if (['facebook ads', 'facebook'].includes(normalized)) return 'FB';
+      if (['tiktok ads', 'tiktok'].includes(normalized)) return 'TT';
+      if (normalized === 'kwai') return 'KW';
+      if (['google ads', 'google'].includes(normalized)) return 'GG';
+      return alphaCode(value, 2, 'XX');
+    };
+    const compactDate = () => new Date().toISOString().slice(0, 10).replaceAll('-', '');
+    const creativeId = (summary, index) => `${productCode(summary["产品"] || form.product.value)}-${countryCode(summary["国家"] || form.country.value)}-${platformCode(summary["平台"] || form.platform.value)}-${compactDate()}-C${String(index + 1).padStart(3, '0')}`;
+    const enrichConcepts = (concepts, summary) => (concepts || []).map((concept, index) => ({...concept, creative_id: creativeId(summary, index)}));
     const productProfiles = __PRODUCT_PROFILE_REQUESTS__;
     let activeProductFacts = [];
     const demos = {
@@ -785,8 +850,9 @@ def _homepage_html():
     function renderGenerated(result) {
       const content = result["素材内容"] || {};
       const summary = content.campaign_summary || {};
-      const concepts = content.video_ad_concepts || [];
+      const concepts = enrichConcepts(content.video_ad_concepts || [], summary);
       const creativeBrief = renderCreativeBriefMarkdown(content, result);
+      const launchBrief = renderMediaBuyerLaunchBrief(summary, concepts);
       statusBox.className = 'status generated';
       statusBox.textContent = `GENERATED generation_id=${result.generation_id} 素材内容`;
       output.innerHTML = `
@@ -800,6 +866,7 @@ def _homepage_html():
         <section class="section"><h2>投放计划区 launch_plan</h2>${renderLaunchPlan(content.launch_plan || {})}</section>
         <section class="section"><h2>红线检查区 forbidden_claims_check</h2>${renderForbiddenCheck(content.forbidden_claims_check || {})}</section>
         <section class="section"><h2>Creative Brief Markdown</h2><button type="button" onclick="copyFullBrief()">Copy Full Brief</button><textarea id="creative-brief-markdown" class="brief-copy-box" readonly>${escapeHtml(creativeBrief)}</textarea></section>
+        <section class="section"><h2>Media Buyer Launch Brief</h2><button type="button" onclick="copyLaunchBrief()">Copy Launch Brief</button><textarea id="media-buyer-launch-brief" class="brief-copy-box launch-brief-copy-box" readonly>${escapeHtml(launchBrief)}</textarea></section>
         ${renderRawJson(result)}
       `;
     }
@@ -815,9 +882,20 @@ def _homepage_html():
       }
     }
 
+    async function copyLaunchBrief() {
+      const target = document.getElementById('media-buyer-launch-brief');
+      if (!target) return;
+      target.select();
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(target.value);
+      } else {
+        document.execCommand('copy');
+      }
+    }
+
     function renderCreativeBriefMarkdown(content, result) {
       const summary = content.campaign_summary || {};
-      const concepts = content.video_ad_concepts || [];
+      const concepts = enrichConcepts(content.video_ad_concepts || [], summary);
       const report = content.scoring_report || {};
       const notes = content.media_production_notes || {};
       const launchPlan = content.launch_plan || {};
@@ -842,7 +920,9 @@ def _homepage_html():
       lines.push('', '## Creative Concepts');
       concepts.forEach((concept) => {
         lines.push('', `### ${formatBriefValue(concept.concept_id)} ${formatBriefValue(concept.concept_name)}`.trim());
+        lines.push(`- Creative ID: ${concept.creative_id}`);
         [
+          'creative_id',
           'target_angle',
           'hook',
           'scene_breakdown',
@@ -900,6 +980,56 @@ def _homepage_html():
       return lines.join('\\n');
     }
 
+    function renderMediaBuyerLaunchBrief(summary, concepts) {
+      const lines = [
+        '# Media Buyer Launch Brief',
+        '',
+        '## Campaign Setup Summary',
+        briefLine('product', summary["产品"] || form.product.value),
+        briefLine('profile/client', form.profile_id.value || form.product.value),
+        briefLine('platform', summary["平台"] || form.platform.value),
+        briefLine('country', summary["国家"] || form.country.value),
+        briefLine('language', summary["投放语言"] || form.language.value),
+        briefLine('audience', summary["目标人群"] || form.audience.value),
+        briefLine('campaign rules summary', form.campaign_rules.value),
+        '',
+        '## Creative Launch Table'
+      ].filter((line) => line !== '');
+      concepts.forEach((concept) => {
+        lines.push('', `### ${concept.creative_id} ${formatBriefValue(concept.concept_name)}`);
+        [
+          briefLine('creative_id', concept.creative_id),
+          briefLine('concept_name', concept.concept_name),
+          briefLine('target_angle', concept.target_angle),
+          briefLine('hook', concept.hook),
+          briefLine('recommended placement / platform', summary["平台"] || form.platform.value),
+          briefLine('recommended test intent', 'Test hook clarity, user fit, and risk-aware platform understanding.'),
+          briefLine('primary metric to watch', 'CTR'),
+          briefLine('secondary metrics to watch', '3s view rate / 50% view rate / registration / deposit / CPA'),
+          briefLine('risk note', 'Pause or rewrite if wording implies guaranteed profit, no risk, or unrealistic outcomes.')
+        ].filter(Boolean).forEach((line) => lines.push(line));
+      });
+      lines.push(
+        '',
+        '## Launch Checklist',
+        '- Confirm product facts',
+        '- Confirm landing page matches ad claim',
+        '- Confirm no guaranteed profit / no risk claim',
+        '- Confirm video file name uses creative_id',
+        '- Confirm captions match voiceover',
+        '- Confirm Facebook copy matches approved brief',
+        '- Confirm tracking / pixel / event setup before launch',
+        '',
+        '## Decision Rules',
+        '- High CTR but low registration: check landing page / offer match',
+        '- Low 3s view rate: improve first 3 seconds hook',
+        '- High 3s view but low click: improve CTA or ad copy',
+        '- High click but no deposit: review onboarding and trust signals',
+        '- Compliance concern: pause and rewrite risky wording'
+      );
+      return lines.join('\\n');
+    }
+
     function renderStatus(result, summary) {
       return `<h2>顶部状态区</h2><div class="grid">
         ${field('状态', 'GENERATED')}
@@ -919,6 +1049,7 @@ def _homepage_html():
         <header><h3>${escapeHtml(concept.concept_name)}</h3><span class="pill">${escapeHtml(concept.concept_id)}</span></header>
         <div class="grid">
           ${field('target_angle', concept.target_angle)}
+          ${field('Creative ID', concept.creative_id)}
           ${field('hook', concept.hook)}
           ${field('15s_script', concept["15s_script"])}
           ${field('voiceover', concept.voiceover)}
