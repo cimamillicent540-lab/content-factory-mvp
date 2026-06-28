@@ -7,6 +7,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from content_factory.config import load_settings
 from content_factory.creative_workflow import attach_creative_ids, build_media_buyer_launch_brief
 from content_factory.db import connect, init_db, loads_json
+from content_factory.performance_analysis import (
+    build_performance_summary,
+    calculate_performance_metrics,
+    parse_performance_csv,
+)
 from content_factory.product_profiles import list_product_profiles, profile_to_generation_request
 from content_factory.provider_factory import create_provider
 from content_factory.services import (
@@ -29,6 +34,12 @@ class ContentFactoryAPI:
     def handle(self, method, path, payload=None):
         if method == "GET" and path == "/":
             return 200, dict(HTML_HEADERS), _homepage_html()
+
+        if method == "GET" and path == "/performance":
+            return 200, dict(HTML_HEADERS), _performance_html()
+
+        if method == "POST" and path == "/performance":
+            return self._handle_performance(payload or {})
 
         if method == "GET" and path == "/history":
             return self._handle_history()
@@ -119,6 +130,13 @@ class ContentFactoryAPI:
                 "投放分析建议": feedback["投放分析建议"],
             },
         )
+
+    def _handle_performance(self, payload):
+        csv_text = payload.get("csv") or payload.get("csv_text") or ""
+        rows = parse_performance_csv(csv_text)
+        aggregated = calculate_performance_metrics(rows)
+        summary = build_performance_summary(aggregated)
+        return 200, dict(HTML_HEADERS), _performance_html(csv_text, aggregated, summary)
 
     def _handle_history(self):
         rows = self.conn.execute(
@@ -535,6 +553,202 @@ def _copy_script():
         }
       }
     """
+
+
+def _sample_performance_csv():
+    return """creative_id,spend,impressions,clicks,link_clicks,registrations,deposits,video_3s_views,video_50_views,video_95_views
+SPK-BR-FB-20260628-C001,30,5000,80,65,5,1,1200,500,220
+SPK-BR-FB-20260628-C002,25,4500,35,28,1,0,600,180,60
+SPK-BR-FB-20260628-C003,20,3000,70,60,0,0,1000,650,300
+"""
+
+
+def _performance_html(csv_text=None, aggregated=None, summary=None):
+    csv_value = csv_text if csv_text is not None else _sample_performance_csv()
+    results = _performance_results_html(aggregated, summary) if aggregated is not None and summary is not None else ""
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Performance CSV Analyzer</title>
+  {_history_style()}
+  <style>
+    .performance-form {{ display: grid; gap: 12px; margin-top: 16px; }}
+    .performance-form textarea {{ width: 100%; min-height: 220px; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }}
+    table {{ width: 100%; border-collapse: collapse; background: #fff; }}
+    th, td {{ border-bottom: 1px solid #dde3ef; padding: 9px; text-align: left; vertical-align: top; font-size: 13px; }}
+    th {{ background: #f8fafc; }}
+    .warning {{ border-color: #fed7aa; background: #fff7ed; }}
+  </style>
+</head>
+<body><main>
+  <nav><a href="/">Back to Generator</a> · <a href="/history">Generation History</a></nav>
+  <h1>Performance CSV Analyzer</h1>
+  <p>Paste media buying CSV data to match Creative IDs, calculate CTR / CPC / CPM / CPA / video retention, and produce internal next-step notes.</p>
+  <section>
+    <h2>Paste CSV</h2>
+    <div class="performance-form">
+      <textarea id="performance-csv" name="csv">{_escape(csv_value)}</textarea>
+      <button type="button" onclick="analyzePerformance()">Analyze Performance</button>
+    </div>
+  </section>
+  <div id="performance-output">{results}</div>
+  <script>
+    async function analyzePerformance() {{
+      const csv = document.getElementById('performance-csv').value;
+      const response = await fetch('/performance', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify({{csv}})
+      }});
+      document.open();
+      document.write(await response.text());
+      document.close();
+    }}
+    async function copyPerformanceSummary() {{
+      const target = document.getElementById('performance-summary-markdown');
+      if (!target) return;
+      target.select();
+      if (navigator.clipboard && navigator.clipboard.writeText) {{
+        await navigator.clipboard.writeText(target.value);
+      }} else {{
+        document.execCommand('copy');
+      }}
+    }}
+  </script>
+</main></body></html>"""
+
+
+def _performance_results_html(aggregated, summary):
+    creatives = aggregated.get("creatives", {})
+    rows = []
+    for creative_id, metrics in creatives.items():
+        rows.append(
+            f"""<tr>
+              <td>{_escape(creative_id)}</td>
+              <td>{_escape(metrics.get("recommendation"))}</td>
+              <td>{_escape(metrics.get("reason"))}</td>
+              <td>{_format_money(metrics.get("total_spend"))}</td>
+              <td>{_format_number(metrics.get("impressions"))}</td>
+              <td>{_format_percent(metrics.get("ctr"))}</td>
+              <td>{_format_percent(metrics.get("link_ctr"))}</td>
+              <td>{_format_money(metrics.get("cpc"))}</td>
+              <td>{_format_money(metrics.get("cpm"))}</td>
+              <td>{_format_money(metrics.get("cpa_registration"))}</td>
+              <td>{_format_money(metrics.get("cpa_deposit"))}</td>
+              <td>{_format_percent(metrics.get("video_3s_rate"))}</td>
+              <td>{_format_percent(metrics.get("video_50_retention"))}</td>
+              <td>{_format_percent(metrics.get("video_95_retention"))}</td>
+              <td>{_escape(metrics.get("action"))}</td>
+            </tr>"""
+        )
+    table_rows = "\n".join(rows) or "<tr><td colspan=\"15\">No matched Creative ID found.</td></tr>"
+    unmatched_html = ""
+    if aggregated.get("unmatched_rows"):
+        unmatched_html = f"""<section class="warning">
+          <h2>Unmatched Rows</h2>
+          <p>No Creative ID found in {len(aggregated.get("unmatched_rows", []))} row(s). Check creative_id, ad_name, campaign_name, or adset_name naming.</p>
+          <pre>{_escape(json.dumps(aggregated.get("unmatched_rows", []), ensure_ascii=False, indent=2))}</pre>
+        </section>"""
+    summary_markdown = _performance_summary_markdown(summary, creatives)
+    return f"""
+      <section>
+        <h2>Summary</h2>
+        <div class="grid">
+          {_kv_card("matched creatives", summary.get("total_creatives_matched"))}
+          {_kv_card("unmatched rows", summary.get("missing_creative_id_rows_count"))}
+          {_kv_card("total spend", _format_money(summary.get("total_spend")))}
+          {_kv_card("best creative by CTR", _summary_best(summary.get("best_creative_by_ctr")))}
+          {_kv_card("best creative by registrations", _summary_best(summary.get("best_creative_by_registrations")))}
+          {_kv_card("best creative by deposits", _summary_best(summary.get("best_creative_by_deposits")))}
+        </div>
+      </section>
+      <section>
+        <h2>Creative Performance Table</h2>
+        <table>
+          <thead><tr>
+            <th>Creative ID</th><th>recommendation</th><th>reason</th><th>Spend</th><th>Impressions</th><th>CTR</th><th>Link CTR</th><th>CPC</th><th>CPM</th><th>CPA registration</th><th>CPA deposit</th><th>3s rate</th><th>50% retention</th><th>95% retention</th><th>Internal Action Notes</th>
+          </tr></thead>
+          <tbody>{table_rows}</tbody>
+        </table>
+      </section>
+      <section>
+        <h2>Internal Action Notes</h2>
+        <ul>{"".join(f"<li>{_escape(note)}</li>" for note in summary.get("internal_action_notes", []))}</ul>
+      </section>
+      {unmatched_html}
+      <section>
+        <h2>Copy Performance Summary</h2>
+        <button type="button" onclick="copyPerformanceSummary()">Copy Performance Summary</button>
+        <textarea id="performance-summary-markdown" class="brief-copy-box" readonly>{_escape(summary_markdown)}</textarea>
+      </section>
+    """
+
+
+def _performance_summary_markdown(summary, creatives):
+    lines = [
+        "# Performance Summary",
+        "",
+        f"- matched creatives: {summary.get('total_creatives_matched')}",
+        f"- unmatched rows: {summary.get('missing_creative_id_rows_count')}",
+        f"- total spend: {_format_money(summary.get('total_spend'))}",
+        f"- best creative by CTR: {_summary_best(summary.get('best_creative_by_ctr'))}",
+        f"- best creative by registrations: {_summary_best(summary.get('best_creative_by_registrations'))}",
+        f"- best creative by deposits: {_summary_best(summary.get('best_creative_by_deposits'))}",
+        "",
+        "## Creative Actions",
+    ]
+    for creative_id, metrics in creatives.items():
+        lines.extend(
+            [
+                "",
+                f"### {creative_id}",
+                f"- recommendation: {metrics.get('recommendation')}",
+                f"- reason: {metrics.get('reason')}",
+                f"- CTR: {_format_percent(metrics.get('ctr'))}",
+                f"- CPC: {_format_money(metrics.get('cpc'))}",
+                f"- CPM: {_format_money(metrics.get('cpm'))}",
+                f"- CPA registration: {_format_money(metrics.get('cpa_registration'))}",
+                f"- video 3s rate: {_format_percent(metrics.get('video_3s_rate'))}",
+                f"- action: {metrics.get('action')}",
+            ]
+        )
+    lines.extend(["", "## Internal Action Notes"])
+    lines.extend(f"- {note}" for note in summary.get("internal_action_notes", []))
+    return "\n".join(lines)
+
+
+def _kv_card(label, value):
+    return f"<div><b>{_escape(label)}</b><br>{_escape(value)}</div>"
+
+
+def _summary_best(value):
+    if not value:
+        return "n/a"
+    metric_key = next((key for key in value if key != "creative_id"), "")
+    metric_value = value.get(metric_key)
+    if metric_key in ("ctr", "link_ctr"):
+        formatted = _format_percent(metric_value)
+    else:
+        formatted = _format_number(metric_value)
+    return f"{value.get('creative_id')} ({metric_key}: {formatted})"
+
+
+def _format_money(value):
+    return "n/a" if value is None else f"${float(value):.2f}"
+
+
+def _format_percent(value):
+    return "n/a" if value is None else f"{float(value) * 100:.2f}%"
+
+
+def _format_number(value):
+    if value is None:
+        return "n/a"
+    if float(value).is_integer():
+        return str(int(value))
+    return f"{float(value):.2f}"
 
 
 def _homepage_html():

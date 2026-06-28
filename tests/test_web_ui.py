@@ -54,6 +54,42 @@ class WebUiTests(unittest.TestCase):
         self.assertIn("clearForm()", body)
         self.assertIn("guaranteed profit, risk-free trading, no loss", body)
 
+    def test_performance_page_exists_with_textarea_and_button(self):
+        status, headers, body = self.app.handle("GET", "/performance")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Content-Type"], "text/html; charset=utf-8")
+        self.assertIn("Performance CSV Analyzer", body)
+        self.assertIn("<textarea", body)
+        self.assertIn("Analyze Performance", body)
+        self.assertIn("creative_id,spend,impressions", body)
+
+    def test_performance_post_displays_analysis_table(self):
+        status, _headers, body = self.app.handle("POST", "/performance", {"csv": self._sample_performance_csv()})
+
+        self.assertEqual(status, 200)
+        self.assertIn("Creative Performance Table", body)
+        self.assertIn("SPK-BR-FB-20260628-C001", body)
+        self.assertIn("recommendation", body)
+        self.assertIn("reason", body)
+        self.assertIn("CTR", body)
+        self.assertIn("CPC", body)
+        self.assertIn("CPM", body)
+        self.assertIn("CPA registration", body)
+        self.assertIn("Copy Performance Summary", body)
+
+    def test_performance_post_displays_unmatched_warning(self):
+        csv_text = """ad_name,spend,impressions,clicks
+SPK-BR-FB-20260628-C001_ai_copy_trading_v1,30,5000,80
+no_id_ad,10,1000,5
+"""
+
+        status, _headers, body = self.app.handle("POST", "/performance", {"csv": csv_text})
+
+        self.assertEqual(status, 200)
+        self.assertIn("Unmatched Rows", body)
+        self.assertIn("No Creative ID found", body)
+
     def test_homepage_calls_existing_generate_api(self):
         _status, _headers, body = self.app.handle("GET", "/")
 
@@ -282,6 +318,13 @@ class WebUiTests(unittest.TestCase):
         request["卖点"] = "guaranteed profit, risk-free trading, no loss"
         request["限制词"] = "none"
         return request
+
+    def _sample_performance_csv(self):
+        return """creative_id,spend,impressions,clicks,link_clicks,registrations,deposits,video_3s_views,video_50_views,video_95_views
+SPK-BR-FB-20260628-C001,30,5000,80,65,5,1,1200,500,220
+SPK-BR-FB-20260628-C002,25,4500,35,28,1,0,600,180,60
+SPK-BR-FB-20260628-C003,20,3000,70,60,0,0,1000,650,300
+"""
 
     def _profile_request(self):
         request = self._valid_request()

@@ -226,6 +226,28 @@ Generated results include a `Media Buyer Launch Brief` with campaign setup, a cr
 
 Customers may see exported Creative Briefs, reports, or selected presentation outputs, but internal teams are the primary users of this MVP.
 
+## Performance CSV Analyzer
+
+The local Web UI includes a `Performance CSV Analyzer` page at `/performance` for internal media buyers and creative teams. It does not call any ad platform API and does not persist performance reports in SQLite; it only analyzes pasted CSV text in the current request.
+
+Supported Creative ID matching:
+
+- Direct columns: `creative_id`, `Creative ID`, `creative id`
+- Name extraction from: `ad_name`, `Ad Name`, `campaign_name`, `Campaign Name`, `adset_name`, `Ad Set Name`
+- Example ID format: `SPK-BR-FB-20260628-C001`
+
+Supported metrics include spend, impressions, clicks, link clicks, registrations, deposits or purchases, 3-second video views, 50% video views, and 95% video views. The analyzer calculates CTR, link CTR, CPC, CPM, registration CPA, deposit CPA, 3s view rate, 50% retention, and 95% retention.
+
+The result page shows a summary, Creative Performance Table, unmatched row warning, internal action notes, and a copyable `Performance Summary` Markdown textarea. Recommendations are rule-based for MVP use, including `SCALE_CANDIDATE`, `KEEP_TESTING`, `NEEDS_RECUT`, `PAUSE`, `CHECK_LANDING_PAGE`, `CHECK_ONBOARDING_OR_TRUST`, `NEEDS_COPY_OR_CTA_TEST`, and `INSUFFICIENT_DATA`.
+
+Example CSV:
+
+```csv
+creative_id,spend,impressions,clicks,link_clicks,registrations,deposits,video_3s_views,video_50_views,video_95_views
+SPK-BR-FB-20260628-C001,30,5000,80,65,5,1,1200,500,220
+SPK-BR-FB-20260628-C002,25,4500,35,28,1,0,600,180,60
+```
+
 ## 本地 Web Demo
 
 进入项目目录：
