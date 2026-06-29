@@ -54,6 +54,20 @@ class WebUiTests(unittest.TestCase):
         self.assertIn("clearForm()", body)
         self.assertIn("guaranteed profit, risk-free trading, no loss", body)
 
+    def test_homepage_includes_internal_workflow_navigation(self):
+        _status, _headers, body = self.app.handle("GET", "/")
+
+        self.assertIn("Internal Workflow Navigation", body)
+        self.assertIn("Generate Creatives", body)
+        self.assertIn('href="/"', body)
+        self.assertIn("Generation History", body)
+        self.assertIn('href="/history"', body)
+        self.assertIn("Performance CSV Analyzer", body)
+        self.assertIn('href="/performance"', body)
+        self.assertIn("Performance Reports", body)
+        self.assertIn('href="/performance/history"', body)
+        self.assertIn("Operator Guide", body)
+
     def test_performance_page_exists_with_textarea_and_button(self):
         status, headers, body = self.app.handle("GET", "/performance")
 
@@ -63,6 +77,15 @@ class WebUiTests(unittest.TestCase):
         self.assertIn("<textarea", body)
         self.assertIn("Analyze Performance", body)
         self.assertIn("creative_id,spend,impressions", body)
+
+    def test_performance_page_includes_copyable_sample_csv(self):
+        _status, _headers, body = self.app.handle("GET", "/performance")
+
+        self.assertIn("Sample CSV", body)
+        self.assertIn("Copy Sample CSV", body)
+        self.assertIn("sample-performance-csv", body)
+        self.assertIn("SPK-BR-FB-20260628-C001,30,5000,80,65,5,1,1200,500,220", body)
+        self.assertIn("<textarea", body)
 
     def test_performance_post_displays_analysis_table(self):
         status, _headers, body = self.app.handle("POST", "/performance", {"csv": self._sample_performance_csv()})
@@ -392,6 +415,19 @@ no_id_ad,10,1000,5
         self.assertIn("http://127.0.0.1:8000", readme)
         self.assertIn("CONTENT_FACTORY_PROVIDER=mock python3 -m unittest discover -v", readme)
         self.assertIn("python3 -m compileall content_factory tests", readme)
+
+    def test_release_pack_docs_exist_and_are_linked(self):
+        operator_guide = Path("docs/internal_operator_guide.md")
+        smoke_checklist = Path("docs/mvp_smoke_test_checklist.md")
+        readme = Path("README.md").read_text()
+
+        self.assertTrue(operator_guide.exists())
+        self.assertTrue(smoke_checklist.exists())
+        self.assertIn("Internal MVP status", readme)
+        self.assertIn("Operator Guide", readme)
+        self.assertIn("docs/internal_operator_guide.md", readme)
+        self.assertIn("Smoke Test Checklist", readme)
+        self.assertIn("docs/mvp_smoke_test_checklist.md", readme)
 
     def _valid_request(self):
         return {

@@ -2,6 +2,55 @@
 
 这是一个本地可运行的海外投流素材内容工厂 MVP。当前版本使用 `MockAIProvider`，不调用任何外部 API，也不需要 API key。它用于验证核心流程：输入素材需求，进行需求结构化、红线审核、多语言素材生成、100 分评分、投放分析，并把记录保存到 SQLite。
 
+## Internal MVP status
+
+当前版本是内部 MVP release pack，用于内部投手、素材负责人、剪辑 / AI 视频制作人员和项目负责人演示、验收和培训。它不是客户自助 SaaS，不包含登录、客户权限、客户 Dashboard、部署配置、Supabase 或 Cloudflare 集成。
+
+已覆盖核心内部工作流：Product Profile → 生成素材 → Creative ID → Creative Brief → Media Buyer Launch Brief → 广告上线命名 → CSV 复盘 → Saved Performance Report → Next Round Recommendations → Next Round Creative Brief Request。
+
+## Quick start
+
+Mock 模式适合本地演示和测试：
+
+```bash
+unset OPENAI_API_KEY
+unset OPENAI_MODEL
+CONTENT_FACTORY_PROVIDER=mock python3 -m content_factory.api --host 127.0.0.1 --port 8000
+```
+
+打开：
+
+```text
+http://127.0.0.1:8000/
+```
+
+## Internal workflow routes
+
+- `/`：Generate Creatives，本地素材生成工作台。
+- `/history`：Generation History，查看生成记录和 BLOCKED 记录。
+- `/performance`：Performance CSV Analyzer，粘贴广告 CSV 并保存复盘报告。
+- `/performance/history`：Performance Reports，查看保存的 CSV 复盘。
+- `/performance/history/{report_id}`：Performance Report Detail，查看 Next Round Recommendations 和 Next Round Creative Brief Request。
+
+## Operator Guide
+
+- [Internal Operator Guide](docs/internal_operator_guide.md)
+- [MVP Smoke Test Checklist](docs/mvp_smoke_test_checklist.md)
+
+## Testing commands
+
+```bash
+unset OPENAI_API_KEY
+unset OPENAI_MODEL
+CONTENT_FACTORY_PROVIDER=mock PYTHONPYCACHEPREFIX=/private/tmp/codex_pycache python3 -m unittest discover -v
+
+PYTHONPYCACHEPREFIX=/private/tmp/codex_pycache python3 -m compileall content_factory tests
+```
+
+## Real OpenAI mode warning
+
+OpenAI 模式只用于真实 LLM 接入测试，需要本地环境变量 `OPENAI_API_KEY` 和可用模型配置。不要把真实 API key 写入代码、测试、README 或提交记录。自动化测试默认使用 mock / fake client，不访问真实 OpenAI API。
+
 ## 当前能力
 
 - 需求结构化：把一组素材需求字段整理成结构化任务。
