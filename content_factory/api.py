@@ -613,6 +613,12 @@ def _performance_html(csv_text=None, aggregated=None, summary=None, report=None)
       <button type="button" onclick="analyzePerformance()">Analyze Performance</button>
     </div>
   </section>
+  <section>
+    <h2>Sample CSV</h2>
+    <p>Use this sample to smoke test Creative ID matching and report saving.</p>
+    <button type="button" onclick="copySampleCsv()">Copy Sample CSV</button>
+    <textarea id="sample-performance-csv" class="brief-copy-box" readonly>{_escape(_sample_performance_csv())}</textarea>
+  </section>
   <div id="performance-output">{results}</div>
   <script>
     async function analyzePerformance() {{
@@ -628,6 +634,16 @@ def _performance_html(csv_text=None, aggregated=None, summary=None, report=None)
     }}
     async function copyPerformanceSummary() {{
       const target = document.getElementById('performance-summary-markdown');
+      if (!target) return;
+      target.select();
+      if (navigator.clipboard && navigator.clipboard.writeText) {{
+        await navigator.clipboard.writeText(target.value);
+      }} else {{
+        document.execCommand('copy');
+      }}
+    }}
+    async function copySampleCsv() {{
+      const target = document.getElementById('sample-performance-csv');
       if (!target) return;
       target.select();
       if (navigator.clipboard && navigator.clipboard.writeText) {{
@@ -1046,6 +1062,16 @@ def _homepage_html():
     <h1>Content Factory MVP</h1>
     <p>Overseas Ad Creative Generator</p>
     <p hidden>海外投流素材内容工厂</p>
+    <section class="section">
+      <h2>Internal Workflow Navigation</h2>
+      <div class="grid">
+        <a href="/">Generate Creatives</a>
+        <a href="/history">Generation History</a>
+        <a href="/performance">Performance CSV Analyzer</a>
+        <a href="/performance/history">Performance Reports</a>
+        <span>README / Operator Guide: docs/internal_operator_guide.md</span>
+      </div>
+    </section>
     <section class="section">
       <h2>Product Profiles</h2>
       <button type="button" onclick="fillProfile('spikex_brazil')">Use Spikex Brazil Profile</button>
