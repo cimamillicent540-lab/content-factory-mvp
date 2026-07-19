@@ -426,10 +426,15 @@ def _history_html(rows):
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8"><title>Generation History</title>{_history_style()}</head>
-<body><main>
-  <nav><a href="/">Back to Generator</a></nav>
-  <h1>Generation History</h1>
-  <p>Recent local saved briefs and blocked generation attempts.</p>
+<body><main class="app-shell">
+  {_top_nav("history")}
+  <section class="hero">
+    <div>
+      <h1>Generation History</h1>
+      <p>Recent local saved briefs and blocked generation attempts.</p>
+    </div>
+    <div class="badge-row"><span class="badge internal">Local Saved Briefs</span></div>
+  </section>
   {body}
 </main></body></html>"""
 
@@ -481,12 +486,20 @@ def _generated_history_detail_html(generation_id, saved, created_at):
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8"><title>Generation Detail</title>{_history_style()}</head>
-<body><main>
-  <nav><a href="/history">Back to History</a></nav>
-  <h1>Generation Detail</h1>
-  <p>status: GENERATED</p>
-  <p>generation_id: {_escape(generation_id)}</p>
-  <p>created_at: {_escape(created_at)}</p>
+<body><main class="app-shell">
+  {_top_nav("history")}
+  <section class="hero">
+    <div>
+      <h1>Generation Detail</h1>
+      <p>Saved creative package with copyable briefs and raw JSON.</p>
+    </div>
+    <div class="badge-row"><span class="badge generated">GENERATED</span></div>
+  </section>
+  <section><div class="grid">
+    {_kv_card("status", "GENERATED")}
+    {_kv_card("generation_id", generation_id)}
+    {_kv_card("created_at", created_at)}
+  </div></section>
   <section><h2>Creative Brief Markdown</h2><button type="button" onclick="copyFullBrief()">Copy Full Brief</button><textarea id="creative-brief-markdown" class="brief-copy-box" readonly>{_escape(brief)}</textarea></section>
   <section><h2>Media Buyer Launch Brief</h2><button type="button" onclick="copyLaunchBrief()">Copy Launch Brief</button><textarea id="media-buyer-launch-brief" class="brief-copy-box launch-brief-copy-box" readonly>{_escape(launch_brief)}</textarea></section>
   <section><h2>Creative Concepts</h2>{concept_cards}</section>
@@ -516,9 +529,15 @@ def _blocked_history_detail_html(row):
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8"><title>Generation Detail</title>{_history_style()}</head>
-<body><main>
-  <nav><a href="/history">Back to History</a></nav>
-  <h1>Generation Detail</h1>
+<body><main class="app-shell">
+  {_top_nav("history")}
+  <section class="hero">
+    <div>
+      <h1>Generation Detail</h1>
+      <p>Blocked request review with risk notes and next actions.</p>
+    </div>
+    <div class="badge-row"><span class="badge blocked">BLOCKED</span></div>
+  </section>
   <section class="danger">
     <h2>BLOCKED</h2>
     <p>阻断原因: {_escape(", ".join(str(item) for item in risks))}</p>
@@ -534,20 +553,63 @@ def _blocked_history_detail_html(row):
 def _history_not_found_html(history_id):
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><title>History record not found</title>{_history_style()}</head>
-<body><main><h1>History record not found</h1><p>No saved generation history for {_escape(history_id)}.</p><a href="/history">Back to History</a></main></body></html>"""
+<body><main class="app-shell">{_top_nav("history")}<h1>History record not found</h1><p>No saved generation history for {_escape(history_id)}.</p><a href="/history">Back to History</a></main></body></html>"""
 
 
 def _history_style():
     return """<style>
-      body { margin: 0; background: #f5f7fb; color: #172033; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-      main { max-width: 1120px; margin: 0 auto; padding: 28px 20px 48px; }
-      a { color: #155eef; font-weight: 700; }
-      .history-card, section { margin-top: 16px; padding: 16px; border: 1px solid #dde3ef; border-radius: 8px; background: #fff; }
+      :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172033; background: #f6f7fb; --line: #d9e0ec; --soft: #f8fafc; --blue: #155eef; --ink: #172033; --muted: #586176; --red: #b42318; --green: #027a48; --amber: #b54708; }
+      body { margin: 0; background: #f6f7fb; color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      main, .app-shell { max-width: 1200px; margin: 0 auto; padding: 28px 20px 52px; }
+      a { color: var(--blue); font-weight: 700; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      .top-nav { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 18px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: 0 1px 2px rgba(16,24,40,.04); }
+      .top-nav a { padding: 8px 10px; border-radius: 7px; color: #344054; }
+      .top-nav a.active { color: #fff; background: var(--blue); text-decoration: none; }
+      .top-nav .brand { margin-right: 8px; font-weight: 850; color: var(--ink); }
+      .hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: start; margin: 18px 0; padding: 22px; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: 0 8px 24px rgba(16,24,40,.06); }
+      .hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: 0; }
+      .hero p { margin: 0; color: var(--muted); }
+      .badge-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+      .badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 999px; border: 1px solid #c7d7fe; background: #eef4ff; color: #1849a9; font-size: 12px; font-weight: 800; white-space: nowrap; }
+      .badge.generated, .badge.green { border-color: #abefc6; background: #ecfdf3; color: var(--green); }
+      .badge.blocked, .badge.red { border-color: #fecdca; background: #fff1f0; color: var(--red); }
+      .badge.internal { border-color: #d0d5dd; background: #f8fafc; color: #344054; }
+      .history-card, .card, section { margin-top: 16px; padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: 0 1px 2px rgba(16,24,40,.04); }
+      .card-grid, .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+      .metric-card, .field, .workflow-step { padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); }
+      .metric-card b, .field b { display: block; margin-bottom: 5px; color: var(--muted); font-size: 12px; }
       .danger { border-color: #f2b8b5; background: #fff7f6; }
-      textarea.brief-copy-box { width: 100%; min-height: 420px; box-sizing: border-box; background: #101828; color: #e6edf7; border: 1px solid #101828; border-radius: 8px; padding: 14px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      textarea.brief-copy-box, textarea.copy-box { width: 100%; box-sizing: border-box; background: #101828; color: #e6edf7; border: 1px solid #101828; border-radius: 8px; padding: 14px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      textarea.brief-copy-box { min-height: 420px; }
       pre { overflow: auto; white-space: pre-wrap; background: #101828; color: #e6edf7; padding: 14px; border-radius: 8px; }
-      button { border: 1px solid #155eef; border-radius: 6px; padding: 10px 16px; background: #155eef; color: #fff; font-weight: 700; cursor: pointer; }
+      .table-wrap { overflow-x: auto; }
+      table { width: 100%; border-collapse: collapse; background: #fff; }
+      th, td { border-bottom: 1px solid var(--line); padding: 10px; text-align: left; vertical-align: top; font-size: 13px; }
+      th { background: var(--soft); color: #344054; }
+      button, .button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--blue); border-radius: 7px; padding: 10px 16px; background: var(--blue); color: #fff; font-weight: 750; cursor: pointer; text-decoration: none; }
+      button.secondary, .button.secondary { border-color: var(--line); background: #fff; color: #344054; }
+      button.danger, .button.danger { border-color: var(--red); background: var(--red); color: #fff; }
+      input, textarea { box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 7px; padding: 10px 11px; font: inherit; background: #fff; }
+      input:focus, textarea:focus { outline: 2px solid #c7d7fe; border-color: var(--blue); }
+      @media (max-width: 760px) { .hero { grid-template-columns: 1fr; } .badge-row { justify-content: flex-start; } button, .button { width: 100%; } }
     </style>"""
+
+
+def _top_nav(active="generate"):
+    links = [
+        ("generate", "Dashboard / Generate", "/"),
+        ("history", "History", "/history"),
+        ("performance", "Performance Analyzer", "/performance"),
+        ("performance_reports", "Performance Reports", "/performance/history"),
+    ]
+    rendered = [f'<span class="brand">Content Factory</span>']
+    for key, label, href in links:
+        css = ' class="active"' if key == active else ""
+        rendered.append(f'<a href="{href}"{css}>{label}</a>')
+    rendered.append('<a href="docs/internal_operator_guide.md">Operator Guide</a>')
+    rendered.append('<a href="docs/mvp_smoke_test_checklist.md">Smoke Test</a>')
+    return f'<nav class="top-nav">{"".join(rendered)}</nav>'
 
 
 def _copy_script():
@@ -602,10 +664,15 @@ def _performance_html(csv_text=None, aggregated=None, summary=None, report=None)
     .warning {{ border-color: #fed7aa; background: #fff7ed; }}
   </style>
 </head>
-<body><main>
-  <nav><a href="/">Back to Generator</a> · <a href="/history">Generation History</a></nav>
-  <h1>Performance CSV Analyzer</h1>
-  <p>Paste media buying CSV data to match Creative IDs, calculate CTR / CPC / CPM / CPA / video retention, and produce internal next-step notes.</p>
+<body><main class="app-shell">
+  {_top_nav("performance")}
+  <section class="hero">
+    <div>
+      <h1>Performance CSV Analyzer</h1>
+      <p>Paste media buying CSV data to match Creative IDs, calculate CTR / CPC / CPM / CPA / video retention, and produce internal next-step notes.</p>
+    </div>
+    <div class="badge-row"><span class="badge internal">CSV MVP</span><span class="badge green">Sample CSV ready</span></div>
+  </section>
   <section>
     <h2>Paste CSV</h2>
     <div class="performance-form">
@@ -692,7 +759,7 @@ def _performance_results_html(aggregated, summary, report=None):
     return f"""
       {saved_notice}
       <section>
-        <h2>Summary</h2>
+        <h2>Summary Metrics</h2>
         <div class="grid">
           {_kv_card("matched creatives", summary.get("total_creatives_matched"))}
           {_kv_card("unmatched rows", summary.get("missing_creative_id_rows_count"))}
@@ -755,10 +822,15 @@ def _performance_history_html(reports):
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8"><title>Performance Reports</title>{_history_style()}</head>
-<body><main>
-  <nav><a href="/performance">Back to Performance Analyzer</a> · <a href="/">Back to Generator</a></nav>
-  <h1>Performance Reports</h1>
-  <p>Saved local CSV analysis reports for internal media buyer and project review.</p>
+<body><main class="app-shell">
+  {_top_nav("performance_reports")}
+  <section class="hero">
+    <div>
+      <h1>Saved Performance Reports</h1>
+      <p>Performance Reports saved locally for internal media buyer and project review.</p>
+    </div>
+    <div class="badge-row"><span class="badge internal">Local MVP History</span></div>
+  </section>
   {body}
 </main></body></html>"""
 
@@ -771,11 +843,19 @@ def _performance_report_detail_html(report):
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8"><title>Performance Report Detail</title>{_history_style()}</head>
-<body><main>
-  <nav><a href="/performance/history">Back to Performance History</a> · <a href="/performance">Analyze New CSV</a></nav>
-  <h1>Performance Report Detail</h1>
-  <p>report_id: {_escape(report.get("report_id"))}</p>
-  <p>created_at: {_escape(report.get("created_at"))}</p>
+<body><main class="app-shell">
+  {_top_nav("performance_reports")}
+  <section class="hero">
+    <div>
+      <h1>Performance Report Detail</h1>
+      <p>Saved CSV analysis, next round recommendations, and copyable brief request.</p>
+    </div>
+    <div class="badge-row"><span class="badge internal">Performance Reports</span></div>
+  </section>
+  <section><div class="grid">
+    {_kv_card("report_id", report.get("report_id"))}
+    {_kv_card("created_at", report.get("created_at"))}
+  </div></section>
   {results}
   {_next_round_recommendations_html(next_round, next_round_markdown)}
   {_next_round_brief_request_html(brief_request)}
@@ -887,7 +967,7 @@ def _html_list(items):
 def _performance_report_not_found_html(report_id):
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><title>Performance report not found</title>{_history_style()}</head>
-<body><main><h1>Performance report not found</h1><p>No saved Performance Report for {_escape(report_id)}.</p><a href="/performance/history">Back to Performance History</a></main></body></html>"""
+<body><main class="app-shell">{_top_nav("performance_reports")}<h1>Performance report not found</h1><p>No saved Performance Report for {_escape(report_id)}.</p><a href="/performance/history">Back to Performance History</a></main></body></html>"""
 
 
 def _performance_summary_markdown(summary, creatives):
@@ -966,6 +1046,7 @@ def _homepage_html():
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Content Factory MVP</title>
+  __SHARED_STYLE__
   <style>
     :root {
       color-scheme: light;
@@ -993,6 +1074,7 @@ def _homepage_html():
       border-radius: 8px;
       padding: 18px;
     }
+    .form-heading { grid-column: 1 / -1; margin: 8px 0 0; padding: 10px 12px; border-radius: 7px; background: #eef4ff; color: #1849a9; font-weight: 850; }
     label { display: grid; gap: 6px; font-size: 14px; font-weight: 650; }
     input, textarea, button {
       width: 100%;
@@ -1039,6 +1121,8 @@ def _homepage_html():
       border-radius: 8px;
       background: #fff;
     }
+    .workflow-step h3 { margin-bottom: 6px; }
+    .workflow-step p { margin-bottom: 0; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
     .field { padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--soft); }
     .field b { display: block; margin-bottom: 5px; color: #586176; font-size: 12px; }
@@ -1058,10 +1142,31 @@ def _homepage_html():
   </style>
 </head>
 <body>
-  <main>
-    <h1>Content Factory MVP</h1>
-    <p>Overseas Ad Creative Generator</p>
+  <main class="app-shell">
+    __TOP_NAV__
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Content Factory MVP</p>
+        <h1>Content Factory</h1>
+        <p>Internal AI creative workflow for media buyers and creative producers.</p>
+        <p>Overseas Ad Creative Generator</p>
+      </div>
+      <div class="badge-row">
+        <span class="badge internal">Internal MVP</span>
+        <span class="badge">Mock Mode</span>
+        <span class="badge green">Spikex Brazil ready</span>
+      </div>
+    </section>
     <p hidden>海外投流素材内容工厂</p>
+    <section class="section">
+      <h2>Workflow Overview</h2>
+      <div class="card-grid">
+        <article class="workflow-step"><h3>Generate Creative Concepts</h3><p>Structure the request, run risk checks, and produce 5 creative concepts.</p></article>
+        <article class="workflow-step"><h3>Prepare Launch Brief</h3><p>Copy Creative Brief Markdown and Media Buyer Launch Brief for production and launch.</p></article>
+        <article class="workflow-step"><h3>Analyze Performance</h3><p>Paste CSV data to match Creative IDs and calculate key media metrics.</p></article>
+        <article class="workflow-step"><h3>Build Next Round Request</h3><p>Turn saved performance reports into next round creative recommendations.</p></article>
+      </div>
+    </section>
     <section class="section">
       <h2>Internal Workflow Navigation</h2>
       <div class="grid">
@@ -1073,15 +1178,26 @@ def _homepage_html():
       </div>
     </section>
     <section class="section">
-      <h2>Product Profiles</h2>
-      <button type="button" onclick="fillProfile('spikex_brazil')">Use Spikex Brazil Profile</button>
+      <h2>Quick Actions</h2>
+      <div class="grid">
+        <div class="field">
+          <b>Product Profiles</b>
+          <button type="button" onclick="fillProfile('spikex_brazil')">Use Spikex Brazil Profile</button>
+        </div>
+        <div class="field">
+          <b>Demo Controls</b>
+          <div class="demo-actions">
+            <button type="button" onclick="fillDemo('spikex')">Spikex Brazil Demo</button>
+            <button type="button" onclick="fillDemo('blocked')">BLOCKED Risk Demo</button>
+            <button type="button" onclick="clearForm()">Clear Form</button>
+          </div>
+        </div>
+      </div>
     </section>
-    <div class="demo-actions">
-      <button type="button" onclick="fillDemo('spikex')">Spikex Brazil Demo</button>
-      <button type="button" onclick="fillDemo('blocked')">BLOCKED Risk Demo</button>
-      <button type="button" onclick="clearForm()">Clear Form</button>
-    </div>
+    <section class="section">
+      <h2>Generate Form</h2>
     <form id="factory-form">
+      <div class="form-heading">Campaign Basics</div>
       <label>行业 industry
         <input name="industry" value="crypto exchange" required>
       </label>
@@ -1091,6 +1207,7 @@ def _homepage_html():
       <label>平台 platform
         <input name="platform" value="Facebook Ads" required>
       </label>
+      <div class="form-heading">Audience & Market</div>
       <label>国家 country
         <input name="country" value="Brazil" required>
       </label>
@@ -1100,12 +1217,14 @@ def _homepage_html():
       <label>人群 audience
         <input name="audience" value="Brazilian retail traders interested in crypto, stocks, copy trading and AI trading tools" required>
       </label>
+      <div class="form-heading">Product Inputs</div>
       <label class="wide">卖点 selling_points
         <input name="selling_points" value="AI copy trading, crypto trading, US stocks trading, fast onboarding, beginner-friendly trading experience" required>
       </label>
       <label>时长 duration
         <input name="duration" value="15" required>
       </label>
+      <div class="form-heading">Compliance Guardrails</div>
       <label>活动规则 campaign_rules
         <input name="campaign_rules" value="Avoid unrealistic financial promises, avoid exaggerated claims, follow platform ad policy, include risk-aware language">
       </label>
@@ -1115,6 +1234,7 @@ def _homepage_html():
       <label>限制词/红线词 restrictions
         <input name="restrictions" value="guaranteed profit, risk-free, no loss" required>
       </label>
+      <div class="form-heading">Generation Demand</div>
       <label class="wide">自定义需求 demand
         <textarea name="demand" placeholder="留空则根据字段自动生成需求">Generate 5 short video ad concepts with hooks, scripts, voiceover, captions and Runway prompts</textarea>
       </label>
@@ -1123,6 +1243,7 @@ def _homepage_html():
         <button type="submit">生成素材卡片</button>
       </div>
     </form>
+    </section>
     <div id="status" class="status">等待生成</div>
     <div id="output">生成结果会显示在这里。</div>
   </main>
@@ -1564,7 +1685,7 @@ def _homepage_html():
     }
   </script>
 </body>
-</html>""".replace("__PRODUCT_PROFILE_REQUESTS__", json.dumps(profile_requests, ensure_ascii=False))
+</html>""".replace("__SHARED_STYLE__", _history_style()).replace("__TOP_NAV__", _top_nav("generate")).replace("__PRODUCT_PROFILE_REQUESTS__", json.dumps(profile_requests, ensure_ascii=False))
 
 
 if __name__ == "__main__":

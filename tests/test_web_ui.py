@@ -57,7 +57,15 @@ class WebUiTests(unittest.TestCase):
     def test_homepage_includes_internal_workflow_navigation(self):
         _status, _headers, body = self.app.handle("GET", "/")
 
+        self.assertIn("app-shell", body)
+        self.assertIn("top-nav", body)
+        self.assertIn("Content Factory", body)
+        self.assertIn("Internal AI creative workflow for media buyers and creative producers.", body)
+        self.assertIn("Internal MVP", body)
+        self.assertIn("Mock Mode", body)
+        self.assertIn("Spikex Brazil ready", body)
         self.assertIn("Internal Workflow Navigation", body)
+        self.assertIn("Dashboard / Generate", body)
         self.assertIn("Generate Creatives", body)
         self.assertIn('href="/"', body)
         self.assertIn("Generation History", body)
@@ -67,6 +75,22 @@ class WebUiTests(unittest.TestCase):
         self.assertIn("Performance Reports", body)
         self.assertIn('href="/performance/history"', body)
         self.assertIn("Operator Guide", body)
+
+    def test_homepage_includes_workflow_overview_and_grouped_form(self):
+        _status, _headers, body = self.app.handle("GET", "/")
+
+        self.assertIn("Workflow Overview", body)
+        self.assertIn("Generate Creative Concepts", body)
+        self.assertIn("Prepare Launch Brief", body)
+        self.assertIn("Analyze Performance", body)
+        self.assertIn("Build Next Round Request", body)
+        self.assertIn("Quick Actions", body)
+        self.assertIn("Generate Form", body)
+        self.assertIn("Campaign Basics", body)
+        self.assertIn("Audience & Market", body)
+        self.assertIn("Product Inputs", body)
+        self.assertIn("Compliance Guardrails", body)
+        self.assertIn("Generation Demand", body)
 
     def test_performance_page_exists_with_textarea_and_button(self):
         status, headers, body = self.app.handle("GET", "/performance")
@@ -91,6 +115,7 @@ class WebUiTests(unittest.TestCase):
         status, _headers, body = self.app.handle("POST", "/performance", {"csv": self._sample_performance_csv()})
 
         self.assertEqual(status, 200)
+        self.assertIn("Summary Metrics", body)
         self.assertIn("Creative Performance Table", body)
         self.assertIn("SPK-BR-FB-20260628-C001", body)
         self.assertIn("recommendation", body)
@@ -117,6 +142,7 @@ class WebUiTests(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(headers["Content-Type"], "text/html; charset=utf-8")
+        self.assertIn("Saved Performance Reports", body)
         self.assertIn("Performance Reports", body)
         self.assertIn("perf-", body)
         self.assertIn("total spend", body)
@@ -135,6 +161,7 @@ class WebUiTests(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertIn("Performance Report Detail", body)
+        self.assertIn("Summary Metrics", body)
         self.assertIn("Summary", body)
         self.assertIn("Creative Performance Table", body)
         self.assertIn("Internal Action Notes", body)

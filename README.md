@@ -231,6 +231,12 @@ http://127.0.0.1:8000/
 
 点击生成后，页面会调用 `POST /generate`，展示中文字段名的结构化 JSON；其中 `素材内容` 会按 `language` 输出对应语言。
 
+## UI Foundation
+
+Web UI 现在采用内部 Creative Ops Dashboard 风格，统一顶部导航覆盖 `Dashboard / Generate`、`History`、`Performance Analyzer` 和 `Performance Reports`。首页是生成工作台，包含 workflow overview、quick actions、Product Profile / Demo 按钮，以及按 Campaign Basics、Audience & Market、Product Inputs、Compliance Guardrails、Generation Demand 分组的生成表单。
+
+这个 UI foundation 只服务本地内部 MVP 演示和操作，不包含登录、客户自助 Dashboard、部署配置或第三方平台接入。
+
 ## Creative Brief Export
 
 当 Web UI 返回 `GENERATED` 结果时，页面会在素材卡片、Prompt、Facebook Ads 文案和评估区之后展示 `Creative Brief Markdown` 区域。
