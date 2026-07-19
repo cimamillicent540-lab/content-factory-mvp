@@ -1,6 +1,7 @@
 import argparse
 import html
 import json
+import os
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -397,45 +398,57 @@ def _creative_brief_markdown(saved, generation_id, created_at=None):
 
 
 def _history_html(rows):
-    cards = []
+    rows_html = []
     for row in rows:
         structured = loads_json(row["structured_json"], {})
         generation = loads_json(row["generation_json"], {}) if row["generation_json"] else {}
         status = "GENERATED" if row["generation_id"] else "BLOCKED"
         history_id = str(row["generation_id"]) if row["generation_id"] else f"blocked-{row['audit_id']}"
         concept_count = len(generation.get("video_ad_concepts", [])) if generation else 0
-        cards.append(
+        rows_html.append(
             f"""
-            <article class="history-card">
-              <h2>{_escape(status)} #{_escape(history_id)}</h2>
-              <p>generation_id: {_escape(history_id)}</p>
-              <p>status: {_escape(status)}</p>
-              <p>created_at: {_escape(row["generation_created_at"] or row["audit_created_at"])}</p>
-              <p>industry: {_escape(row["industry"])}</p>
-              <p>product: {_escape(row["product"])}</p>
-              <p>platform: {_escape(row["platform"])}</p>
-              <p>country: {_escape(row["country"])}</p>
-              <p>language: {_escape(structured.get("语言", ""))}</p>
-              <p>concept count: {_escape(concept_count)}</p>
-              <p>is BLOCKED: {_escape(status == "BLOCKED")}</p>
-              <a href="/history/{_escape(history_id)}">View</a>
-            </article>
+            <tr>
+              <td>{_status_badge(status)}</td>
+              <td><strong>{_escape(row["product"])}</strong><br><span class="helper">{_escape(row["industry"])}</span></td>
+              <td>{_escape(row["country"])}<br><span class="helper">{_escape(structured.get("语言", ""))}</span></td>
+              <td>{_escape(row["platform"])}</td>
+              <td class="num">{_escape(concept_count)}</td>
+              <td>{_escape(_friendly_datetime(row["generation_created_at"] or row["audit_created_at"]))}</td>
+              <td><a class="button button-secondary" href="/history/{_escape(history_id)}">查看详情</a></td>
+            </tr>
             """
         )
-    body = "\n".join(cards) or "<p>No generation history yet.</p>"
+    if rows_html:
+        body = f"""
+        <section class="panel">
+          <div class="data-table-wrap history-list">
+            <table class="data-table">
+              <thead><tr><th>状态</th><th>产品</th><th>市场</th><th>平台</th><th class="num">素材数量</th><th>创建时间</th><th>操作</th></tr></thead>
+              <tbody>{"".join(rows_html)}</tbody>
+            </table>
+          </div>
+        </section>
+        """
+    else:
+        body = """<div class="empty-state">
+          <h2>还没有生成记录</h2>
+          <p>生成成功或被红线阻断的请求都会保存在这里，方便复盘和复制 Brief。</p>
+          <a class="button button-primary" href="/">返回工作台</a>
+        </div>"""
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8"><title>Generation History</title>{_history_style()}</head>
 <body><main class="app-shell">
   {_top_nav("history")}
-  <section class="hero">
+  <section class="page-header">
     <div>
       <h1>Generation History</h1>
       <p>Recent local saved briefs and blocked generation attempts.</p>
     </div>
-    <div class="badge-row"><span class="badge internal">Local Saved Briefs</span></div>
+    <div class="page-actions"><a class="button button-primary" href="/">新建素材</a></div>
   </section>
   {body}
+  {_shell_end()}
 </main></body></html>"""
 
 
@@ -488,23 +501,28 @@ def _generated_history_detail_html(generation_id, saved, created_at):
 <head><meta charset="utf-8"><title>Generation Detail</title>{_history_style()}</head>
 <body><main class="app-shell">
   {_top_nav("history")}
-  <section class="hero">
+  <section class="page-header">
     <div>
       <h1>Generation Detail</h1>
       <p>Saved creative package with copyable briefs and raw JSON.</p>
     </div>
-    <div class="badge-row"><span class="badge generated">GENERATED</span></div>
+    <div class="page-actions">{_status_badge("GENERATED")}</div>
   </section>
-  <section><div class="grid">
+  <section class="panel"><div class="grid">
     {_kv_card("status", "GENERATED")}
     {_kv_card("generation_id", generation_id)}
-    {_kv_card("created_at", created_at)}
+    {_kv_card("created_at", _friendly_datetime(created_at))}
+    {_kv_card("product", summary.get("产品") or product.get("name"))}
+    {_kv_card("country", summary.get("国家") or product.get("country"))}
+    {_kv_card("platform", summary.get("平台") or product.get("platform"))}
+    {_kv_card("creative count", len(concepts))}
   </div></section>
-  <section><h2>Creative Brief Markdown</h2><button type="button" onclick="copyFullBrief()">Copy Full Brief</button><textarea id="creative-brief-markdown" class="brief-copy-box" readonly>{_escape(brief)}</textarea></section>
-  <section><h2>Media Buyer Launch Brief</h2><button type="button" onclick="copyLaunchBrief()">Copy Launch Brief</button><textarea id="media-buyer-launch-brief" class="brief-copy-box launch-brief-copy-box" readonly>{_escape(launch_brief)}</textarea></section>
-  <section><h2>Creative Concepts</h2>{concept_cards}</section>
-  <section><h2>Raw JSON</h2><pre>{_escape(json.dumps(raw_payload, ensure_ascii=False, indent=2))}</pre></section>
+  <section class="panel"><h2>素材概念</h2>{concept_cards}</section>
+  <section class="panel"><h2>Creative Brief</h2><button class="button-secondary" type="button" onclick="copyFullBrief()">Copy Full Brief</button><textarea id="creative-brief-markdown" class="brief-copy-box" readonly>{_escape(brief)}</textarea></section>
+  <section class="panel"><h2>Media Buyer Launch Brief</h2><button class="button-secondary" type="button" onclick="copyLaunchBrief()">Copy Launch Brief</button><textarea id="media-buyer-launch-brief" class="brief-copy-box launch-brief-copy-box" readonly>{_escape(launch_brief)}</textarea></section>
+  <section class="panel"><h2>技术数据</h2><details><summary>Raw JSON</summary><pre>{_escape(json.dumps(raw_payload, ensure_ascii=False, indent=2))}</pre></details></section>
   <script>{_copy_script()}</script>
+  {_shell_end()}
 </main></body></html>"""
 
 
@@ -531,85 +549,222 @@ def _blocked_history_detail_html(row):
 <head><meta charset="utf-8"><title>Generation Detail</title>{_history_style()}</head>
 <body><main class="app-shell">
   {_top_nav("history")}
-  <section class="hero">
+  <section class="page-header">
     <div>
       <h1>Generation Detail</h1>
       <p>Blocked request review with risk notes and next actions.</p>
     </div>
-    <div class="badge-row"><span class="badge blocked">BLOCKED</span></div>
+    <div class="page-actions">{_status_badge("BLOCKED")}</div>
   </section>
-  <section class="danger">
+  <section class="panel danger">
     <h2>BLOCKED</h2>
-    <p>阻断原因: {_escape(", ".join(str(item) for item in risks))}</p>
-    <p>risks: {_escape(", ".join(str(item) for item in audit.get("risks", [])))}</p>
-    <p>risk_explanation: {_escape(audit.get("risk_explanation") or audit.get("summary", ""))}</p>
-    <p>safer_alternatives: {_escape(_format_brief_value(audit.get("替代表达建议", [])))}</p>
-    <p>next_actions: {_escape(_format_brief_value(audit.get("next_actions", [])))}</p>
+    <div class="grid">
+      {_kv_card("风险原因", ", ".join(str(item) for item in risks))}
+      {_kv_card("命中规则", ", ".join(str(item) for item in audit.get("risks", [])))}
+      {_kv_card("风险说明", audit.get("risk_explanation") or audit.get("summary", ""))}
+      {_kv_card("安全替代表达", _format_brief_value(audit.get("替代表达建议", [])))}
+      {_kv_card("下一步建议", _format_brief_value(audit.get("next_actions", [])))}
+    </div>
   </section>
-  <section><h2>Raw JSON</h2><pre>{_escape(json.dumps(raw_payload, ensure_ascii=False, indent=2))}</pre></section>
+  <section class="panel"><h2>技术数据</h2><details><summary>Raw JSON</summary><pre>{_escape(json.dumps(raw_payload, ensure_ascii=False, indent=2))}</pre></details></section>
+  {_shell_end()}
 </main></body></html>"""
 
 
 def _history_not_found_html(history_id):
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><title>History record not found</title>{_history_style()}</head>
-<body><main class="app-shell">{_top_nav("history")}<h1>History record not found</h1><p>No saved generation history for {_escape(history_id)}.</p><a href="/history">Back to History</a></main></body></html>"""
+<body><main class="app-shell">{_top_nav("history")}<div class="empty-state"><h1>History record not found</h1><p>No saved generation history for {_escape(history_id)}.</p><a class="button button-secondary" href="/history">Back to History</a></div>{_shell_end()}</main></body></html>"""
 
 
 def _history_style():
     return """<style>
-      :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172033; background: #f6f7fb; --line: #d9e0ec; --soft: #f8fafc; --blue: #155eef; --ink: #172033; --muted: #586176; --red: #b42318; --green: #027a48; --amber: #b54708; }
-      body { margin: 0; background: #f6f7fb; color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-      main, .app-shell { max-width: 1200px; margin: 0 auto; padding: 28px 20px 52px; }
-      a { color: var(--blue); font-weight: 700; text-decoration: none; }
-      a:hover { text-decoration: underline; }
-      .top-nav { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 18px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: 0 1px 2px rgba(16,24,40,.04); }
-      .top-nav a { padding: 8px 10px; border-radius: 7px; color: #344054; }
-      .top-nav a.active { color: #fff; background: var(--blue); text-decoration: none; }
-      .top-nav .brand { margin-right: 8px; font-weight: 850; color: var(--ink); }
-      .hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: start; margin: 18px 0; padding: 22px; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: 0 8px 24px rgba(16,24,40,.06); }
-      .hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: 0; }
-      .hero p { margin: 0; color: var(--muted); }
-      .badge-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
-      .badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 999px; border: 1px solid #c7d7fe; background: #eef4ff; color: #1849a9; font-size: 12px; font-weight: 800; white-space: nowrap; }
-      .badge.generated, .badge.green { border-color: #abefc6; background: #ecfdf3; color: var(--green); }
-      .badge.blocked, .badge.red { border-color: #fecdca; background: #fff1f0; color: var(--red); }
-      .badge.internal { border-color: #d0d5dd; background: #f8fafc; color: #344054; }
-      .history-card, .card, section { margin-top: 16px; padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: 0 1px 2px rgba(16,24,40,.04); }
-      .card-grid, .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
-      .metric-card, .field, .workflow-step { padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); }
-      .metric-card b, .field b { display: block; margin-bottom: 5px; color: var(--muted); font-size: 12px; }
-      .danger { border-color: #f2b8b5; background: #fff7f6; }
-      textarea.brief-copy-box, textarea.copy-box { width: 100%; box-sizing: border-box; background: #101828; color: #e6edf7; border: 1px solid #101828; border-radius: 8px; padding: 14px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-      textarea.brief-copy-box { min-height: 420px; }
-      pre { overflow: auto; white-space: pre-wrap; background: #101828; color: #e6edf7; padding: 14px; border-radius: 8px; }
-      .table-wrap { overflow-x: auto; }
-      table { width: 100%; border-collapse: collapse; background: #fff; }
-      th, td { border-bottom: 1px solid var(--line); padding: 10px; text-align: left; vertical-align: top; font-size: 13px; }
-      th { background: var(--soft); color: #344054; }
-      button, .button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--blue); border-radius: 7px; padding: 10px 16px; background: var(--blue); color: #fff; font-weight: 750; cursor: pointer; text-decoration: none; }
-      button.secondary, .button.secondary { border-color: var(--line); background: #fff; color: #344054; }
-      button.danger, .button.danger { border-color: var(--red); background: var(--red); color: #fff; }
-      input, textarea { box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 7px; padding: 10px 11px; font: inherit; background: #fff; }
-      input:focus, textarea:focus { outline: 2px solid #c7d7fe; border-color: var(--blue); }
-      @media (max-width: 760px) { .hero { grid-template-columns: 1fr; } .badge-row { justify-content: flex-start; } button, .button { width: 100%; } }
+      :root {
+        color-scheme: light;
+        --bg: #f7f7fa;
+        --surface: #ffffff;
+        --surface-muted: #f2f3f7;
+        --text-primary: #1f2430;
+        --text-secondary: #667085;
+        --border: #e5e7ef;
+        --brand: #5b5ce2;
+        --brand-hover: #4748c9;
+        --success: #15803d;
+        --warning: #b45309;
+        --danger: #b42318;
+        --radius-sm: 6px;
+        --radius-md: 10px;
+        --radius-lg: 14px;
+        --shadow-sm: 0 1px 2px rgba(16,24,40,.06);
+        --sidebar-width: 236px;
+        font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--text-primary); font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      a { color: inherit; text-decoration: none; }
+      a:hover { color: var(--brand); }
+      .app-shell { min-height: 100vh; max-width: none; margin: 0; padding: 0; display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr); background: var(--bg); }
+      .sidebar { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; padding: 18px 14px; border-right: 1px solid var(--border); background: rgba(255,255,255,.86); backdrop-filter: blur(12px); }
+      .brand-block { display: grid; grid-template-columns: 34px 1fr; gap: 10px; align-items: center; padding: 6px 8px 18px; }
+      .brand-mark { width: 34px; height: 34px; display: grid; place-items: center; border-radius: var(--radius-md); background: var(--brand); color: #fff; }
+      .brand-title { font-weight: 760; letter-spacing: 0; }
+      .brand-subtitle { margin-top: 2px; color: var(--text-secondary); font-size: 12px; }
+      .sidebar-section { margin-top: 10px; }
+      .sidebar-label { padding: 0 10px 8px; color: #98a2b3; font-size: 11px; font-weight: 760; text-transform: uppercase; letter-spacing: .04em; }
+      .sidebar-link { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 9px 10px; border-radius: var(--radius-sm); color: #4b5565; font-size: 14px; font-weight: 650; }
+      .sidebar-link svg, .nav-icon { width: 16px; height: 16px; flex: 0 0 auto; stroke-width: 2; }
+      .sidebar-link.active { background: #eeeeff; color: var(--brand); }
+      .sidebar-footer { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--border); }
+      .workspace { min-width: 0; padding: 0 28px 56px; }
+      .topbar { position: sticky; top: 0; z-index: 3; min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 18px; margin: 0 -28px 24px; padding: 12px 28px; border-bottom: 1px solid var(--border); background: rgba(247,247,250,.9); backdrop-filter: blur(12px); }
+      .topbar-title { font-weight: 760; }
+      .topbar-meta { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+      .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin: 0 auto 18px; max-width: 1180px; }
+      .page-header h1 { margin: 0; font-size: 26px; line-height: 1.18; letter-spacing: 0; }
+      .page-header p { margin: 6px 0 0; color: var(--text-secondary); line-height: 1.5; }
+      .page-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+      .panel { max-width: 1180px; margin: 14px auto 0; padding: 18px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-sm); }
+      .panel-muted { background: var(--surface-muted); box-shadow: none; }
+      .panel h2 { margin: 0 0 12px; font-size: 17px; letter-spacing: 0; }
+      .panel h3 { margin: 0 0 8px; font-size: 14px; }
+      .helper { margin: 0 0 12px; color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+      .split-layout { max-width: 1180px; margin: 14px auto 0; display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, .8fr); gap: 16px; align-items: start; }
+      .two-column { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 360px); gap: 16px; align-items: start; }
+      .sticky-summary { position: sticky; top: 76px; }
+      .workflow-grid, .card-grid, .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+      .workflow-step { padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+      .workflow-step.active { border-color: #d7d7ff; background: #f4f4ff; }
+      .step-kicker { display: flex; align-items: center; justify-content: space-between; color: var(--text-secondary); font-size: 12px; font-weight: 760; }
+      .metric-card, .field { padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-muted); }
+      .metric-card b, .field b { display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: 12px; font-weight: 720; }
+      .metric-card strong { font-size: 20px; }
+      .badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-muted); color: #475467; font-size: 12px; font-weight: 760; white-space: nowrap; }
+      .badge.generated, .badge.success, .badge.green, .badge.scale_candidate { border-color: #bbf7d0; background: #ecfdf3; color: var(--success); }
+      .badge.blocked, .badge.warning, .badge.needs_recut, .badge.check_landing_page { border-color: #fed7aa; background: #fff7ed; color: var(--warning); }
+      .badge.danger, .badge.pause { border-color: #fecaca; background: #fef2f2; color: var(--danger); }
+      .badge.brand { border-color: #d7d7ff; background: #eeeeff; color: var(--brand); }
+      .button-primary, button.button-primary { border: 1px solid var(--brand); background: var(--brand); color: #fff; }
+      .button-primary:hover, button.button-primary:hover { background: var(--brand-hover); color: #fff; }
+      .button-secondary, button.button-secondary { border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); }
+      .button-ghost, button.button-ghost { border: 1px solid transparent; background: transparent; color: #475467; }
+      .button-warning, button.button-warning { border: 1px solid #f59e0b; background: transparent; color: var(--warning); }
+      button, .button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border-radius: var(--radius-sm); padding: 9px 13px; font: inherit; font-weight: 720; cursor: pointer; text-decoration: none; min-height: 36px; }
+      button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid #c7d2fe; outline-offset: 2px; }
+      .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+      .field-group { padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+      .field-group + .field-group { margin-top: 12px; }
+      .field-group-title { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; font-size: 15px; font-weight: 760; }
+      label { display: grid; gap: 6px; color: #344054; font-size: 13px; font-weight: 680; }
+      input, textarea { width: 100%; border: 1px solid #d0d5dd; border-radius: var(--radius-sm); padding: 9px 10px; background: #fff; color: var(--text-primary); font: inherit; }
+      textarea { min-height: 92px; resize: vertical; }
+      input:focus, textarea:focus { border-color: var(--brand); outline: 2px solid #e0e7ff; }
+      .field-help { color: var(--text-secondary); font-size: 12px; font-weight: 500; }
+      .duration-input { max-width: 120px; }
+      .data-table-wrap, .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+      .data-table { width: 100%; min-width: 760px; border-collapse: collapse; }
+      .data-table th, .data-table td { border-bottom: 1px solid var(--border); padding: 11px 12px; text-align: left; vertical-align: middle; font-size: 13px; }
+      .data-table th { background: #fafbff; color: var(--text-secondary); font-size: 12px; font-weight: 780; }
+      .data-table tr:last-child td { border-bottom: 0; }
+      .data-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+      .empty-state { max-width: 760px; margin: 18px auto; padding: 28px; border: 1px dashed #cfd4df; border-radius: var(--radius-md); background: #fff; text-align: center; color: var(--text-secondary); }
+      .code-panel, textarea.brief-copy-box, textarea.copy-box, pre { width: 100%; overflow: auto; white-space: pre-wrap; border: 1px solid #1f2937; border-radius: var(--radius-md); background: #111827; color: #e5e7eb; padding: 14px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.55; }
+      textarea.brief-copy-box { min-height: 360px; }
+      textarea.copy-box { min-height: 88px; }
+      details { margin-top: 14px; }
+      summary { cursor: pointer; font-weight: 760; color: var(--text-primary); }
+      .danger { border-color: #fed7aa; background: #fff7ed; }
+      .concept-card { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+      .concept-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px; }
+      .concept-card details { margin: 0; border-top: 1px solid var(--border); padding: 12px 14px; }
+      .concept-title { margin: 0 0 6px; font-size: 15px; }
+      @media (max-width: 920px) {
+        .app-shell { grid-template-columns: 1fr; }
+        .sidebar { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+        .sidebar-section, .sidebar-footer { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; border-top: 0; }
+        .sidebar-label { display: none; }
+        .workspace { padding: 0 16px 40px; }
+        .topbar { margin: 0 -16px 18px; padding: 12px 16px; align-items: flex-start; flex-direction: column; }
+        .page-header, .split-layout, .two-column { grid-template-columns: 1fr; display: grid; }
+        .sticky-summary { position: static; }
+        .form-grid { grid-template-columns: 1fr; }
+      }
     </style>"""
+
+
+def _icon(name):
+    icons = {
+        "factory": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 20V8l5 4V8l5 4V5h6v15H4Z"/><path d="M8 16h1M13 16h1M18 16h1"/></svg>',
+        "dashboard": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 13h7V4H4v9ZM13 20h7V4h-7v16ZM4 20h7v-5H4v5Z"/></svg>',
+        "generate": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z"/><path d="m18 15 .8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8L18 15Z"/></svg>',
+        "history": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 5h16M4 12h16M4 19h10"/><path d="M18 17v4l3-2-3-2Z"/></svg>',
+        "performance": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 19V5"/><path d="M4 19h16"/><path d="m7 15 3-4 3 2 5-7"/></svg>',
+        "reports": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 3h9l3 3v15H6V3Z"/><path d="M14 3v4h4"/><path d="M9 13h6M9 17h6M9 9h2"/></svg>',
+        "guide": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3V4Z"/><path d="M8 8h7M8 12h7"/></svg>',
+        "check": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 11l2 2 4-5"/><path d="M5 4h14v16H5z"/></svg>',
+    }
+    return icons.get(name, icons["dashboard"])
+
+
+def _provider_badge():
+    provider = os.environ.get("CONTENT_FACTORY_PROVIDER", "mock").strip().lower() or "mock"
+    label = "OpenAI" if provider == "openai" else "Mock"
+    css = "brand" if provider == "openai" else ""
+    return f'<span class="badge {css}">{_escape(label)} Mode</span>'
 
 
 def _top_nav(active="generate"):
     links = [
-        ("generate", "Dashboard / Generate", "/"),
-        ("history", "History", "/history"),
-        ("performance", "Performance Analyzer", "/performance"),
-        ("performance_reports", "Performance Reports", "/performance/history"),
+        ("dashboard", "工作台", "/", "dashboard"),
+        ("generate", "素材生成", "/", "generate"),
+        ("history", "生成记录", "/history", "history"),
+        ("performance", "数据分析", "/performance", "performance"),
+        ("performance_reports", "复盘报告", "/performance/history", "reports"),
     ]
-    rendered = [f'<span class="brand">Content Factory</span>']
-    for key, label, href in links:
-        css = ' class="active"' if key == active else ""
-        rendered.append(f'<a href="{href}"{css}>{label}</a>')
-    rendered.append('<a href="docs/internal_operator_guide.md">Operator Guide</a>')
-    rendered.append('<a href="docs/mvp_smoke_test_checklist.md">Smoke Test</a>')
-    return f'<nav class="top-nav">{"".join(rendered)}</nav>'
+    page_titles = {
+        "dashboard": "工作台",
+        "generate": "工作台",
+        "history": "生成记录",
+        "performance": "投放数据分析",
+        "performance_reports": "复盘报告",
+    }
+    if active == "generate":
+        active = "dashboard"
+    rendered = [
+        '<aside class="sidebar">',
+        '<div class="brand-block"><div class="brand-mark">' + _icon("factory") + '</div><div><div class="brand-title">Content Factory</div><div class="brand-subtitle">Creative Operations</div></div></div>',
+        '<div class="sidebar-section"><div class="sidebar-label">Main</div>',
+    ]
+    for key, label, href, icon in links:
+        css = " active" if key == active else ""
+        rendered.append(f'<a class="sidebar-link{css}" href="{href}">{_icon(icon)}<span>{label}</span></a>')
+    rendered.extend(
+        [
+            '</div><div class="sidebar-footer">',
+            '<a class="sidebar-link" href="docs/internal_operator_guide.md">' + _icon("guide") + '<span>操作指南</span></a>',
+            '<a class="sidebar-link" href="docs/mvp_smoke_test_checklist.md">' + _icon("check") + '<span>验收清单</span></a>',
+            '</div></aside>',
+            '<div class="workspace">',
+            '<header class="topbar">',
+            f'<div class="topbar-title">{_escape(page_titles.get(active, "工作台"))}</div>',
+            '<div class="topbar-meta"><span class="badge brand">Spikex Brazil</span>' + _provider_badge() + '<span class="badge">Internal MVP</span></div>',
+            '</header>',
+        ]
+    )
+    return "".join(rendered)
+
+
+def _shell_end():
+    return "</div>"
+
+
+def _friendly_datetime(value):
+    text = str(value or "")
+    return text.replace("T", " ")[:16] if text else "未记录"
+
+
+def _status_badge(status):
+    css = "generated" if status == "GENERATED" else "blocked"
+    return f'<span class="badge {css}">{_escape(status)}</span>'
 
 
 def _copy_script():
@@ -666,26 +821,32 @@ def _performance_html(csv_text=None, aggregated=None, summary=None, report=None)
 </head>
 <body><main class="app-shell">
   {_top_nav("performance")}
-  <section class="hero">
+  <section class="page-header">
     <div>
-      <h1>Performance CSV Analyzer</h1>
-      <p>Paste media buying CSV data to match Creative IDs, calculate CTR / CPC / CPM / CPA / video retention, and produce internal next-step notes.</p>
+      <h1>投放数据分析</h1>
+      <p>通过 Creative ID 匹配广告数据并生成下一轮建议。</p>
     </div>
-    <div class="badge-row"><span class="badge internal">CSV MVP</span><span class="badge green">Sample CSV ready</span></div>
+    <div class="page-actions"><a class="button button-secondary" href="/performance/history">查看复盘报告</a></div>
   </section>
-  <section>
-    <h2>Paste CSV</h2>
-    <div class="performance-form">
-      <textarea id="performance-csv" name="csv">{_escape(csv_value)}</textarea>
-      <button type="button" onclick="analyzePerformance()">Analyze Performance</button>
-    </div>
-  </section>
-  <section>
-    <h2>Sample CSV</h2>
-    <p>Use this sample to smoke test Creative ID matching and report saving.</p>
-    <button type="button" onclick="copySampleCsv()">Copy Sample CSV</button>
-    <textarea id="sample-performance-csv" class="brief-copy-box" readonly>{_escape(_sample_performance_csv())}</textarea>
-  </section>
+  <div class="split-layout">
+    <section class="panel">
+      <h2>粘贴广告 CSV</h2>
+      <p class="helper">需要包含 Creative ID，或在 ad_name / campaign_name 中带有类似 SPK-BR-FB-20260628-C001 的命名。</p>
+      <div class="performance-form">
+        <textarea id="performance-csv" name="csv">{_escape(csv_value)}</textarea>
+        <button class="button-primary" type="button" onclick="analyzePerformance()">Analyze Performance</button>
+      </div>
+    </section>
+    <aside class="panel panel-muted">
+      <h2>Import Guide</h2>
+      <p class="helper">支持 spend、impressions、clicks、link_clicks、registrations、deposits、video views 等列。</p>
+      <details>
+        <summary>Sample CSV</summary>
+        <button class="button-secondary" type="button" onclick="copySampleCsv()">Copy Sample CSV</button>
+        <textarea id="sample-performance-csv" class="brief-copy-box" readonly>{_escape(_sample_performance_csv())}</textarea>
+      </details>
+    </aside>
+  </div>
   <div id="performance-output">{results}</div>
   <script>
     async function analyzePerformance() {{
@@ -720,6 +881,7 @@ def _performance_html(csv_text=None, aggregated=None, summary=None, report=None)
       }}
     }}
   </script>
+  {_shell_end()}
 </main></body></html>"""
 
 
@@ -727,29 +889,30 @@ def _performance_results_html(aggregated, summary, report=None):
     creatives = aggregated.get("creatives", {})
     rows = []
     for creative_id, metrics in creatives.items():
+        rec = str(metrics.get("recommendation") or "").lower()
         rows.append(
             f"""<tr>
               <td>{_escape(creative_id)}</td>
-              <td>{_escape(metrics.get("recommendation"))}</td>
+              <td><span class="badge {rec}">{_escape(metrics.get("recommendation"))}</span></td>
               <td>{_escape(metrics.get("reason"))}</td>
-              <td>{_format_money(metrics.get("total_spend"))}</td>
-              <td>{_format_number(metrics.get("impressions"))}</td>
-              <td>{_format_percent(metrics.get("ctr"))}</td>
-              <td>{_format_percent(metrics.get("link_ctr"))}</td>
-              <td>{_format_money(metrics.get("cpc"))}</td>
-              <td>{_format_money(metrics.get("cpm"))}</td>
-              <td>{_format_money(metrics.get("cpa_registration"))}</td>
-              <td>{_format_money(metrics.get("cpa_deposit"))}</td>
-              <td>{_format_percent(metrics.get("video_3s_rate"))}</td>
-              <td>{_format_percent(metrics.get("video_50_retention"))}</td>
-              <td>{_format_percent(metrics.get("video_95_retention"))}</td>
+              <td class="num">{_format_money(metrics.get("total_spend"))}</td>
+              <td class="num">{_format_number(metrics.get("impressions"))}</td>
+              <td class="num">{_format_percent(metrics.get("ctr"))}</td>
+              <td class="num">{_format_percent(metrics.get("link_ctr"))}</td>
+              <td class="num">{_format_money(metrics.get("cpc"))}</td>
+              <td class="num">{_format_money(metrics.get("cpm"))}</td>
+              <td class="num">{_format_money(metrics.get("cpa_registration"))}</td>
+              <td class="num">{_format_money(metrics.get("cpa_deposit"))}</td>
+              <td class="num">{_format_percent(metrics.get("video_3s_rate"))}</td>
+              <td class="num">{_format_percent(metrics.get("video_50_retention"))}</td>
+              <td class="num">{_format_percent(metrics.get("video_95_retention"))}</td>
               <td>{_escape(metrics.get("action"))}</td>
             </tr>"""
         )
     table_rows = "\n".join(rows) or "<tr><td colspan=\"15\">No matched Creative ID found.</td></tr>"
     unmatched_html = ""
     if aggregated.get("unmatched_rows"):
-        unmatched_html = f"""<section class="warning">
+        unmatched_html = f"""<section class="panel warning">
           <h2>Unmatched Rows</h2>
           <p>No Creative ID found in {len(aggregated.get("unmatched_rows", []))} row(s). Check creative_id, ad_name, campaign_name, or adset_name naming.</p>
           <pre>{_escape(json.dumps(aggregated.get("unmatched_rows", []), ensure_ascii=False, indent=2))}</pre>
@@ -758,80 +921,112 @@ def _performance_results_html(aggregated, summary, report=None):
     saved_notice = _performance_saved_notice(report) if report else ""
     return f"""
       {saved_notice}
-      <section>
+      <section class="panel">
         <h2>Summary Metrics</h2>
-        <div class="grid">
-          {_kv_card("matched creatives", summary.get("total_creatives_matched"))}
-          {_kv_card("unmatched rows", summary.get("missing_creative_id_rows_count"))}
-          {_kv_card("total spend", _format_money(summary.get("total_spend")))}
-          {_kv_card("best creative by CTR", _summary_best(summary.get("best_creative_by_ctr")))}
-          {_kv_card("best creative by registrations", _summary_best(summary.get("best_creative_by_registrations")))}
-          {_kv_card("best creative by deposits", _summary_best(summary.get("best_creative_by_deposits")))}
-        </div>
+        {_performance_kpi_cards(summary, creatives)}
       </section>
-      <section>
+      <section class="panel">
         <h2>Creative Performance Table</h2>
-        <table>
+        <div class="data-table-wrap"><table class="data-table">
           <thead><tr>
-            <th>Creative ID</th><th>recommendation</th><th>reason</th><th>Spend</th><th>Impressions</th><th>CTR</th><th>Link CTR</th><th>CPC</th><th>CPM</th><th>CPA registration</th><th>CPA deposit</th><th>3s rate</th><th>50% retention</th><th>95% retention</th><th>Internal Action Notes</th>
+            <th>Creative ID</th><th>recommendation</th><th>reason</th><th class="num">Spend</th><th class="num">Impressions</th><th class="num">CTR</th><th class="num">Link CTR</th><th class="num">CPC</th><th class="num">CPM</th><th class="num">CPA registration</th><th class="num">CPA deposit</th><th class="num">3s rate</th><th class="num">50% retention</th><th class="num">95% retention</th><th>Internal Action Notes</th>
           </tr></thead>
           <tbody>{table_rows}</tbody>
-        </table>
+        </table></div>
       </section>
-      <section>
+      <section class="panel">
         <h2>Internal Action Notes</h2>
         <ul>{"".join(f"<li>{_escape(note)}</li>" for note in summary.get("internal_action_notes", []))}</ul>
       </section>
       {unmatched_html}
-      <section>
+      <section class="panel">
         <h2>Copy Performance Summary</h2>
-        <button type="button" onclick="copyPerformanceSummary()">Copy Performance Summary</button>
+        <button class="button-secondary" type="button" onclick="copyPerformanceSummary()">Copy Performance Summary</button>
         <textarea id="performance-summary-markdown" class="brief-copy-box" readonly>{_escape(summary_markdown)}</textarea>
       </section>
     """
 
 
 def _performance_saved_notice(report):
-    return f"""<section>
+    return f"""<section class="panel">
         <h2>Saved Performance Report</h2>
-        <p>report_id: {_escape(report.get("report_id"))}</p>
+        <p class="helper">report_id: {_escape(report.get("report_id"))}</p>
         <p>Creative IDs can be matched against generated creative briefs by ID. Full linking can be added later.</p>
-        <a href="/performance/history/{_escape(report.get("report_id"))}">View Saved Report</a>
-        · <a href="/performance/history">View Performance History</a>
+        <a class="button button-secondary" href="/performance/history/{_escape(report.get("report_id"))}">View Saved Report</a>
+        <a class="button button-ghost" href="/performance/history">View Performance History</a>
       </section>"""
 
 
+def _performance_kpi_cards(summary, creatives):
+    totals = {
+        "clicks": 0,
+        "registrations": 0,
+        "deposits": 0,
+        "impressions": 0,
+    }
+    for metrics in creatives.values():
+        totals["clicks"] += float(metrics.get("clicks") or 0)
+        totals["registrations"] += float(metrics.get("registrations") or 0)
+        totals["deposits"] += float(metrics.get("deposits") or 0)
+        totals["impressions"] += float(metrics.get("impressions") or 0)
+    ctr = totals["clicks"] / totals["impressions"] if totals["impressions"] else None
+    cpa = float(summary.get("total_spend") or 0) / totals["registrations"] if totals["registrations"] else None
+    cards = [
+        ("花费", _format_money(summary.get("total_spend"))),
+        ("展示", _format_number(totals["impressions"])),
+        ("点击", _format_number(totals["clicks"])),
+        ("注册", _format_number(totals["registrations"])),
+        ("充值", _format_number(totals["deposits"])),
+        ("CTR", _format_percent(ctr)),
+        ("CPA", _format_money(cpa)),
+    ]
+    return '<div class="grid">' + "".join(_metric_card(label, value) for label, value in cards) + "</div>"
+
+
 def _performance_history_html(reports):
-    cards = []
+    rows = []
     for report in reports:
-        cards.append(
-            f"""<article class="history-card">
-              <h2>{_escape(report.get("report_id"))}</h2>
-              <p>created_at: {_escape(report.get("created_at"))}</p>
-              <p>total spend: {_format_money(report.get("total_spend"))}</p>
-              <p>matched creative count: {_escape(report.get("matched_creative_count"))}</p>
-              <p>unmatched row count: {_escape(report.get("unmatched_row_count"))}</p>
-              <p>SCALE_CANDIDATE: {_escape(report.get("scale_candidate_count"))}</p>
-              <p>NEEDS_RECUT: {_escape(report.get("needs_recut_count"))}</p>
-              <p>PAUSE: {_escape(report.get("pause_count"))}</p>
-              <p>CHECK_LANDING_PAGE: {_escape(report.get("check_landing_page_count"))}</p>
-              <a href="/performance/history/{_escape(report.get("report_id"))}">View Report</a>
-            </article>"""
+        rows.append(
+            f"""<tr>
+              <td><strong>{_escape(report.get("report_id"))}</strong><br><span class="helper">{_escape(_friendly_datetime(report.get("created_at")))}</span></td>
+              <td class="num">{_format_money(report.get("total_spend"))}</td>
+              <td class="num">{_escape(report.get("matched_creative_count"))}</td>
+              <td class="num">{_escape(report.get("unmatched_row_count"))}</td>
+              <td><span class="badge scale_candidate">SCALE_CANDIDATE {_escape(report.get("scale_candidate_count"))}</span></td>
+              <td><span class="badge needs_recut">NEEDS_RECUT {_escape(report.get("needs_recut_count"))}</span></td>
+              <td><span class="badge pause">PAUSE {_escape(report.get("pause_count"))}</span></td>
+              <td><a class="button button-secondary" href="/performance/history/{_escape(report.get("report_id"))}">View Report</a></td>
+            </tr>"""
         )
-    body = "\n".join(cards) or "<p>No saved performance reports yet.</p>"
+    if rows:
+        body = f"""<section class="panel">
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Report</th><th class="num">Total Spend</th><th class="num">Matched</th><th class="num">Unmatched</th><th>Scale</th><th>Recut</th><th>Pause</th><th>操作</th></tr></thead>
+              <tbody>{"".join(rows)}</tbody>
+            </table>
+          </div>
+        </section>"""
+    else:
+        body = """<div class="empty-state">
+          <h2>No saved performance reports yet.</h2>
+          <p>Paste a CSV in Performance Analyzer to create the first saved report.</p>
+          <a class="button button-primary" href="/performance">Analyze Performance</a>
+        </div>"""
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8"><title>Performance Reports</title>{_history_style()}</head>
 <body><main class="app-shell">
   {_top_nav("performance_reports")}
-  <section class="hero">
+  <section class="page-header">
     <div>
       <h1>Saved Performance Reports</h1>
       <p>Performance Reports saved locally for internal media buyer and project review.</p>
     </div>
-    <div class="badge-row"><span class="badge internal">Local MVP History</span></div>
+    <div class="page-actions"><a class="button button-primary" href="/performance">Analyze New CSV</a></div>
   </section>
   {body}
+  {_shell_end()}
 </main></body></html>"""
 
 
@@ -845,23 +1040,27 @@ def _performance_report_detail_html(report):
 <head><meta charset="utf-8"><title>Performance Report Detail</title>{_history_style()}</head>
 <body><main class="app-shell">
   {_top_nav("performance_reports")}
-  <section class="hero">
+  <section class="page-header">
     <div>
       <h1>Performance Report Detail</h1>
       <p>Saved CSV analysis, next round recommendations, and copyable brief request.</p>
     </div>
-    <div class="badge-row"><span class="badge internal">Performance Reports</span></div>
+    <div class="page-actions"><a class="button button-secondary" href="/performance/history">Back to Reports</a></div>
   </section>
-  <section><div class="grid">
+  <section class="panel"><div class="grid">
     {_kv_card("report_id", report.get("report_id"))}
-    {_kv_card("created_at", report.get("created_at"))}
+    {_kv_card("日期", _friendly_datetime(report.get("created_at")))}
+    {_kv_card("Creative 数量", report.get("summary", {}).get("total_creatives_matched"))}
+    {_kv_card("总花费", _format_money(report.get("summary", {}).get("total_spend")))}
+    {_kv_card("总注册", _format_number(sum(float(item.get("registrations") or 0) for item in report.get("aggregated", {}).get("creatives", {}).values())))}
+    {_kv_card("总充值", _format_number(sum(float(item.get("deposits") or 0) for item in report.get("aggregated", {}).get("creatives", {}).values())))}
   </div></section>
   {results}
   {_next_round_recommendations_html(next_round, next_round_markdown)}
   {_next_round_brief_request_html(brief_request)}
-  <section>
+  <section class="panel">
     <h2>Raw CSV</h2>
-    <details open><summary>Raw CSV Preview</summary><pre>{_escape(report.get("raw_csv_preview", ""))}</pre></details>
+    <details><summary>Raw CSV Preview</summary><pre>{_escape(report.get("raw_csv_preview", ""))}</pre></details>
   </section>
   <script>
     async function copyPerformanceSummary() {{
@@ -895,11 +1094,12 @@ def _performance_report_detail_html(report):
       }}
     }}
   </script>
+  {_shell_end()}
 </main></body></html>"""
 
 
 def _next_round_recommendations_html(recommendations, markdown):
-    return f"""<section>
+    return f"""<section class="panel">
     <h2>Next Round Creative Recommendations</h2>
     <h3>Summary</h3>
     <div class="grid">
@@ -907,12 +1107,14 @@ def _next_round_recommendations_html(recommendations, markdown):
       {_kv_card("creative_count", recommendations.get("summary", {}).get("creative_count"))}
       {_kv_card("planning note", recommendations.get("summary", {}).get("message"))}
     </div>
-    {_recommendation_group_html("Scale Candidates", recommendations.get("scale_candidates", []))}
-    {_recommendation_group_html("Keep Testing", recommendations.get("keep_testing", []))}
-    {_recommendation_group_html("Needs Recut", recommendations.get("needs_recut", []))}
-    {_recommendation_group_html("Copy / CTA Tests", recommendations.get("copy_or_cta_tests", []))}
-    {_recommendation_group_html("Landing Page Checks", recommendations.get("landing_page_checks", []))}
-    {_recommendation_group_html("Pause", recommendations.get("pause", []))}
+    <div class="card-grid">
+      {_recommendation_group_html("建议放量", recommendations.get("scale_candidates", []))}
+      {_recommendation_group_html("继续测试", recommendations.get("keep_testing", []))}
+      {_recommendation_group_html("需要重剪", recommendations.get("needs_recut", []))}
+      {_recommendation_group_html("检查落地页", recommendations.get("landing_page_checks", []))}
+      {_recommendation_group_html("暂停", recommendations.get("pause", []))}
+      {_recommendation_group_html("Copy / CTA Tests", recommendations.get("copy_or_cta_tests", []))}
+    </div>
     <h3>Next Round Angles</h3>
     {_html_list(recommendations.get("next_round_angles", []))}
     <h3>Creative Brief Requests</h3>
@@ -921,7 +1123,7 @@ def _next_round_recommendations_html(recommendations, markdown):
     <h3>Internal Notes</h3>
     {_html_list(recommendations.get("internal_notes", []))}
     <h3>Copy Next Round Plan</h3>
-    <button type="button" onclick="copyNextRoundPlan()">Copy Next Round Plan</button>
+    <button class="button-secondary" type="button" onclick="copyNextRoundPlan()">Copy Next Round Plan</button>
     <textarea id="next-round-plan-markdown" class="brief-copy-box" readonly>{_escape(markdown)}</textarea>
   </section>"""
 
@@ -932,7 +1134,7 @@ def _recommendation_group_html(title, items):
     cards = []
     for item in items:
         cards.append(
-            f"""<article class="history-card">
+            f"""<article class="field">
               <h4>{_escape(item.get("creative_id"))} · {_escape(item.get("current_recommendation"))}</h4>
               <p>priority: {_escape(item.get("priority"))}</p>
               <p>reason: {_escape(item.get("reason"))}</p>
@@ -940,12 +1142,12 @@ def _recommendation_group_html(title, items):
               <p>suggested_variation: {_escape(item.get("suggested_variation"))}</p>
             </article>"""
         )
-    return f"<h3>{_escape(title)}</h3>{''.join(cards)}"
+    return f'<div class="panel-muted field-group"><h3>{_escape(title)}</h3>{"".join(cards)}</div>'
 
 
 def _next_round_brief_request_html(brief_request):
     structured = brief_request.get("structured", {})
-    return f"""<section>
+    return f"""<section class="panel" id="next-round-brief-request">
     <h2>Next Round Creative Brief Request</h2>
     <p>This request is for internal media buyers and creative producers. It does not generate new creatives automatically.</p>
     <div class="grid">
@@ -953,7 +1155,7 @@ def _next_round_brief_request_html(brief_request):
       {_kv_card("Generation requests", len(structured.get("generation_requests", [])))}
       {_kv_card("Suggested Naming", ", ".join(structured.get("suggested_naming", [])[:3]))}
     </div>
-    <button type="button" onclick="copyNextRoundRequest()">Copy Next Round Request</button>
+    <button class="button-primary" type="button" onclick="copyNextRoundRequest()">Copy Request</button>
     <textarea id="next-round-request-markdown" class="brief-copy-box" readonly>{_escape(brief_request.get("markdown", ""))}</textarea>
   </section>"""
 
@@ -967,7 +1169,7 @@ def _html_list(items):
 def _performance_report_not_found_html(report_id):
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><title>Performance report not found</title>{_history_style()}</head>
-<body><main class="app-shell">{_top_nav("performance_reports")}<h1>Performance report not found</h1><p>No saved Performance Report for {_escape(report_id)}.</p><a href="/performance/history">Back to Performance History</a></main></body></html>"""
+<body><main class="app-shell">{_top_nav("performance_reports")}<div class="empty-state"><h1>Performance report not found</h1><p>No saved Performance Report for {_escape(report_id)}.</p><a class="button button-secondary" href="/performance/history">Back to Performance History</a></div>{_shell_end()}</main></body></html>"""
 
 
 def _performance_summary_markdown(summary, creatives):
@@ -1004,7 +1206,11 @@ def _performance_summary_markdown(summary, creatives):
 
 
 def _kv_card(label, value):
-    return f"<div><b>{_escape(label)}</b><br>{_escape(value)}</div>"
+    return f'<div class="field"><b>{_escape(label)}</b><div>{_escape(value)}</div></div>'
+
+
+def _metric_card(label, value):
+    return f'<div class="metric-card"><b>{_escape(label)}</b><strong>{_escape(value)}</strong></div>'
 
 
 def _summary_best(value):
@@ -1065,40 +1271,11 @@ def _homepage_html():
     h2 { margin: 0 0 14px; font-size: 21px; }
     h3 { margin: 0 0 10px; font-size: 16px; }
     p { margin: 0 0 20px; color: #586176; }
-    form {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 14px;
-      background: #fff;
-      border: 1px solid #dde3ef;
-      border-radius: 8px;
-      padding: 18px;
-    }
-    .form-heading { grid-column: 1 / -1; margin: 8px 0 0; padding: 10px 12px; border-radius: 7px; background: #eef4ff; color: #1849a9; font-weight: 850; }
-    label { display: grid; gap: 6px; font-size: 14px; font-weight: 650; }
-    input, textarea, button {
-      width: 100%;
-      box-sizing: border-box;
-      border: 1px solid #cbd5e1;
-      border-radius: 6px;
-      padding: 10px 11px;
-      font: inherit;
-      background: #fff;
-    }
+    form { display: grid; gap: 12px; }
+    input, textarea, button { font: inherit; }
     textarea { min-height: 84px; resize: vertical; }
     .wide { grid-column: 1 / -1; }
-    .demo-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0 12px; }
-    button {
-      width: max-content;
-      border-color: var(--blue);
-      border-radius: 6px;
-      padding: 10px 16px;
-      background: var(--blue);
-      color: #fff;
-      font: inherit;
-      font-weight: 700;
-      cursor: pointer;
-    }
+    .demo-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     pre {
       margin-top: 18px;
       padding: 18px;
@@ -1114,19 +1291,13 @@ def _homepage_html():
     .status { margin-top: 14px; font-weight: 700; }
     .blocked { color: var(--red); }
     .generated { color: var(--green); }
-    .section {
-      margin-top: 18px;
-      padding: 18px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fff;
-    }
+    .section { margin-top: 14px; }
     .workflow-step h3 { margin-bottom: 6px; }
     .workflow-step p { margin-bottom: 0; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
     .field { padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--soft); }
     .field b { display: block; margin-bottom: 5px; color: #586176; font-size: 12px; }
-    .creative-card { margin-top: 12px; padding: 14px; border: 2px solid #c7d7fe; border-radius: 8px; background: #fbfcff; }
+    .creative-card { margin-top: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
     .creative-card header { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
     .pill { border-radius: 999px; background: #e0eaff; color: #1849a9; padding: 4px 9px; font-weight: 800; font-size: 12px; }
     textarea.copy-box { min-height: 96px; margin: 8px 0 12px; background: #101828; color: #e6edf7; border-color: #101828; }
@@ -1144,108 +1315,124 @@ def _homepage_html():
 <body>
   <main class="app-shell">
     __TOP_NAV__
-    <section class="hero">
+    <section class="page-header">
       <div>
-        <p class="eyebrow">Content Factory MVP</p>
-        <h1>Content Factory</h1>
-        <p>Internal AI creative workflow for media buyers and creative producers.</p>
-        <p>Overseas Ad Creative Generator</p>
+        <h1>工作台</h1>
+        <p>管理素材生成、上线 Brief、投放复盘与下一轮迭代。</p>
       </div>
-      <div class="badge-row">
-        <span class="badge internal">Internal MVP</span>
-        <span class="badge">Mock Mode</span>
-        <span class="badge green">Spikex Brazil ready</span>
+      <div class="page-actions">
+        <span class="badge brand">Spikex Brazil</span>
+        <button class="button-primary" type="button" onclick="form.requestSubmit()">新建素材</button>
       </div>
     </section>
     <p hidden>海外投流素材内容工厂</p>
-    <section class="section">
+    <section class="panel panel-muted">
       <h2>Workflow Overview</h2>
-      <div class="card-grid">
-        <article class="workflow-step"><h3>Generate Creative Concepts</h3><p>Structure the request, run risk checks, and produce 5 creative concepts.</p></article>
-        <article class="workflow-step"><h3>Prepare Launch Brief</h3><p>Copy Creative Brief Markdown and Media Buyer Launch Brief for production and launch.</p></article>
-        <article class="workflow-step"><h3>Analyze Performance</h3><p>Paste CSV data to match Creative IDs and calculate key media metrics.</p></article>
-        <article class="workflow-step"><h3>Build Next Round Request</h3><p>Turn saved performance reports into next round creative recommendations.</p></article>
+      <div class="workflow-grid">
+        <article class="workflow-step active"><div class="step-kicker"><span>01</span><span>当前</span></div><h3>生成素材</h3><p class="helper">产出 5 套概念。</p></article>
+        <article class="workflow-step"><div class="step-kicker"><span>02</span><span>Brief</span></div><h3>准备上线</h3><p class="helper">复制 Launch Brief。</p></article>
+        <article class="workflow-step"><div class="step-kicker"><span>03</span><span>CSV</span></div><h3>分析表现</h3><p class="helper">匹配 Creative ID。</p></article>
+        <article class="workflow-step"><div class="step-kicker"><span>04</span><span>Next</span></div><h3>下一轮迭代</h3><p class="helper">生成复盘请求。</p></article>
       </div>
     </section>
-    <section class="section">
-      <h2>Internal Workflow Navigation</h2>
-      <div class="grid">
-        <a href="/">Generate Creatives</a>
-        <a href="/history">Generation History</a>
-        <a href="/performance">Performance CSV Analyzer</a>
-        <a href="/performance/history">Performance Reports</a>
-        <span>README / Operator Guide: docs/internal_operator_guide.md</span>
-      </div>
-    </section>
-    <section class="section">
+    <div class="split-layout">
+      <section class="panel">
+        <h2>开始生成</h2>
+        <p class="helper">当前 Profile 已预置 Spikex Brazil，可直接生成或先微调下方表单。</p>
+        <div class="grid">
+          <div class="field"><b>当前 Profile</b><div>Spikex Brazil</div></div>
+          <div class="field"><b>国家</b><div>Brazil</div></div>
+          <div class="field"><b>平台</b><div>Facebook Ads</div></div>
+          <div class="field"><b>语言</b><div>Brazilian Portuguese</div></div>
+          <div class="field wide"><b>核心卖点</b><div>AI copy trading, crypto trading, US stocks trading, fast onboarding</div></div>
+        </div>
+        <div class="demo-actions">
+          <button class="button-primary" type="button" onclick="form.requestSubmit()">开始生成素材</button>
+        </div>
+      </section>
+      <aside class="panel panel-muted">
+        <h2>最近活动</h2>
+        <div class="grid">
+          <div class="field"><b>最近 Generation</b><div>查看生成记录</div></div>
+          <div class="field"><b>最近 Report</b><div>查看复盘报告</div></div>
+          <div class="field"><b>保存记录</b><div>本地 SQLite</div></div>
+        </div>
+        <div class="demo-actions"><a class="button button-secondary" href="/history">查看全部</a></div>
+      </aside>
+    </div>
+    <section class="panel">
       <h2>Quick Actions</h2>
-      <div class="grid">
-        <div class="field">
-          <b>Product Profiles</b>
-          <button type="button" onclick="fillProfile('spikex_brazil')">Use Spikex Brazil Profile</button>
-        </div>
-        <div class="field">
-          <b>Demo Controls</b>
-          <div class="demo-actions">
-            <button type="button" onclick="fillDemo('spikex')">Spikex Brazil Demo</button>
-            <button type="button" onclick="fillDemo('blocked')">BLOCKED Risk Demo</button>
-            <button type="button" onclick="clearForm()">Clear Form</button>
-          </div>
-        </div>
+      <div class="demo-actions">
+        <button class="button-secondary" type="button" onclick="fillProfile('spikex_brazil')">加载 Spikex Profile</button>
+        <button class="button-ghost" type="button" onclick="fillDemo('spikex')">Spikex Brazil Demo</button>
+        <button class="button-warning" type="button" onclick="fillDemo('blocked')">测试风险阻断</button>
+        <button class="button-ghost" type="button" onclick="clearForm()">清空表单</button>
       </div>
     </section>
-    <section class="section">
-      <h2>Generate Form</h2>
+    <section class="panel">
+      <h2>生成表单</h2>
+      <div class="two-column">
     <form id="factory-form">
-      <div class="form-heading">Campaign Basics</div>
-      <label>行业 industry
-        <input name="industry" value="crypto exchange" required>
-      </label>
-      <label>产品 product
-        <input name="product" value="Spikex" required>
-      </label>
-      <label>平台 platform
-        <input name="platform" value="Facebook Ads" required>
-      </label>
-      <div class="form-heading">Audience & Market</div>
-      <label>国家 country
-        <input name="country" value="Brazil" required>
-      </label>
-      <label>语言 language
-        <input name="language" value="Brazilian Portuguese" required>
-      </label>
-      <label>人群 audience
-        <input name="audience" value="Brazilian retail traders interested in crypto, stocks, copy trading and AI trading tools" required>
-      </label>
-      <div class="form-heading">Product Inputs</div>
-      <label class="wide">卖点 selling_points
-        <input name="selling_points" value="AI copy trading, crypto trading, US stocks trading, fast onboarding, beginner-friendly trading experience" required>
-      </label>
-      <label>时长 duration
-        <input name="duration" value="15" required>
-      </label>
-      <div class="form-heading">Compliance Guardrails</div>
-      <label>活动规则 campaign_rules
-        <input name="campaign_rules" value="Avoid unrealistic financial promises, avoid exaggerated claims, follow platform ad policy, include risk-aware language">
-      </label>
-      <label>禁用表达 forbidden_claims
-        <input name="forbidden_claims" value="guaranteed profit, risk-free, no loss">
-      </label>
-      <label>限制词/红线词 restrictions
-        <input name="restrictions" value="guaranteed profit, risk-free, no loss" required>
-      </label>
-      <div class="form-heading">Generation Demand</div>
-      <label class="wide">自定义需求 demand
-        <textarea name="demand" placeholder="留空则根据字段自动生成需求">Generate 5 short video ad concepts with hooks, scripts, voiceover, captions and Runway prompts</textarea>
-      </label>
+      <section class="field-group">
+        <div class="field-group-title">基础信息</div>
+        <p class="helper">定义本次素材包对应的产品与投放渠道。</p>
+        <div class="form-grid">
+          <label>行业<input name="industry" value="crypto exchange" required><span class="field-help">例如 crypto exchange</span></label>
+          <label>产品<input name="product" value="Spikex" required></label>
+          <label>投放平台<input name="platform" value="Facebook Ads" required></label>
+          <label>视频时长<input class="duration-input" name="duration" value="15" required></label>
+        </div>
+      </section>
+      <section class="field-group">
+        <div class="field-group-title">市场与受众</div>
+        <p class="helper">控制正式素材语言和受众场景。</p>
+        <div class="form-grid">
+          <label>国家或地区<input name="country" value="Brazil" required></label>
+          <label>素材语言<input name="language" value="Brazilian Portuguese" required></label>
+          <label class="wide">目标受众<textarea name="audience" required>Brazilian retail traders interested in crypto, stocks, copy trading and AI trading tools</textarea></label>
+        </div>
+      </section>
+      <section class="field-group">
+        <div class="field-group-title">产品信息</div>
+        <p class="helper">只写已确认事实，不写收益承诺。</p>
+        <div class="form-grid">
+          <label class="wide">核心卖点<textarea name="selling_points" required>AI copy trading, crypto trading, US stocks trading, fast onboarding, beginner-friendly trading experience</textarea></label>
+          <label class="wide">活动规则<textarea name="campaign_rules">Avoid unrealistic financial promises, avoid exaggerated claims, follow platform ad policy, include risk-aware language</textarea></label>
+        </div>
+      </section>
+      <section class="field-group">
+        <div class="field-group-title">合规要求</div>
+        <p class="helper">命中红线会阻断生成，并保存阻断原因。</p>
+        <div class="form-grid">
+          <label>禁止表述<input name="forbidden_claims" value="guaranteed profit, risk-free, no loss"></label>
+          <label>红线词<input name="restrictions" value="guaranteed profit, risk-free, no loss" required></label>
+        </div>
+      </section>
+      <section class="field-group">
+        <div class="field-group-title">生成要求</div>
+        <p class="helper">描述本轮要输出的素材方向。</p>
+        <label>生成需求<textarea name="demand" placeholder="留空则根据字段自动生成需求">Generate 5 short video ad concepts with hooks, scripts, voiceover, captions and Runway prompts</textarea></label>
+      </section>
       <input type="hidden" name="profile_id" value="">
-      <div class="wide">
-        <button type="submit">生成素材卡片</button>
-      </div>
+      <button class="button-primary" type="submit">生成素材</button>
     </form>
+    <aside class="panel-muted field-group sticky-summary">
+      <h2>Summary</h2>
+      <div class="grid">
+        <div class="field"><b>当前 Profile</b><div>Spikex Brazil</div></div>
+        <div class="field"><b>市场</b><div>Brazil</div></div>
+        <div class="field"><b>平台</b><div>Facebook Ads</div></div>
+        <div class="field"><b>语言</b><div>Brazilian Portuguese</div></div>
+        <div class="field"><b>预计生成</b><div>5 套素材</div></div>
+        <div class="field"><b>合规规则数量</b><div>3+</div></div>
+      </div>
+      <div class="demo-actions"><button class="button-primary" type="button" onclick="form.requestSubmit()">生成素材</button></div>
+    </aside>
+      </div>
     </section>
     <div id="status" class="status">等待生成</div>
     <div id="output">生成结果会显示在这里。</div>
+    __SHELL_END__
   </main>
   <script>
     const form = document.getElementById('factory-form');
@@ -1405,17 +1592,14 @@ def _homepage_html():
       statusBox.className = 'status generated';
       statusBox.textContent = `GENERATED generation_id=${result.generation_id} 素材内容`;
       output.innerHTML = `
-        <section class="section"><h2>Saved to History</h2><p>Saved to History · <a href="/history">View History</a></p></section>
-        <section class="section">${renderStatus(result, summary)}</section>
-        <section class="section"><h2>5 套素材卡片</h2>${concepts.map(renderCreativeCard).join('')}</section>
-        <section class="section"><h2>Prompt 专区</h2>${concepts.map(renderPromptBlock).join('')}</section>
-        <section class="section"><h2>Facebook Ads 文案专区</h2>${concepts.map(renderFacebookBlock).join('')}</section>
-        <section class="section"><h2>评分报告区 scoring_report</h2>${renderScoring(content.scoring_report || {})}</section>
-        <section class="section"><h2>制作建议区</h2>${renderKeyValues(content.media_production_notes || {})}</section>
-        <section class="section"><h2>投放计划区 launch_plan</h2>${renderLaunchPlan(content.launch_plan || {})}</section>
-        <section class="section"><h2>红线检查区 forbidden_claims_check</h2>${renderForbiddenCheck(content.forbidden_claims_check || {})}</section>
-        <section class="section"><h2>Creative Brief Markdown</h2><button type="button" onclick="copyFullBrief()">Copy Full Brief</button><textarea id="creative-brief-markdown" class="brief-copy-box" readonly>${escapeHtml(creativeBrief)}</textarea></section>
-        <section class="section"><h2>Media Buyer Launch Brief</h2><button type="button" onclick="copyLaunchBrief()">Copy Launch Brief</button><textarea id="media-buyer-launch-brief" class="brief-copy-box launch-brief-copy-box" readonly>${escapeHtml(launchBrief)}</textarea></section>
+        <section class="panel"><div class="page-header"><div><h2>GENERATED · 5 Creative Concepts</h2><p>Saved to History · <a href="/history">View History</a></p></div><span class="badge generated">GENERATED</span></div>${renderStatus(result, summary)}</section>
+        <section class="panel"><h2>Creative Concepts</h2><div class="card-grid">${concepts.map(renderCreativeCard).join('')}</div></section>
+        <section class="panel"><h2>Creative Brief</h2><button class="button-secondary" type="button" onclick="copyFullBrief()">Copy Full Brief</button><textarea id="creative-brief-markdown" class="brief-copy-box" readonly>${escapeHtml(creativeBrief)}</textarea></section>
+        <section class="panel"><h2>Media Buyer Launch Brief</h2><button class="button-secondary" type="button" onclick="copyLaunchBrief()">Copy Launch Brief</button><textarea id="media-buyer-launch-brief" class="brief-copy-box launch-brief-copy-box" readonly>${escapeHtml(launchBrief)}</textarea></section>
+        <section class="panel"><details><summary>Production Prompts</summary>${concepts.map(renderPromptBlock).join('')}</details></section>
+        <section class="panel"><details><summary>Facebook Ads Copy</summary>${concepts.map(renderFacebookBlock).join('')}</details></section>
+        <section class="panel"><h2>评分报告区 scoring_report</h2>${renderScoring(content.scoring_report || {})}</section>
+        <section class="panel"><details><summary>制作建议与投放计划</summary><h3>制作建议区</h3>${renderKeyValues(content.media_production_notes || {})}<h3>投放计划区 launch_plan</h3>${renderLaunchPlan(content.launch_plan || {})}<h3>红线检查区 forbidden_claims_check</h3>${renderForbiddenCheck(content.forbidden_claims_check || {})}</details></section>
         ${renderRawJson(result)}
       `;
     }
@@ -1594,11 +1778,13 @@ def _homepage_html():
     }
 
     function renderCreativeCard(concept) {
-      return `<article class="creative-card">
-        <header><h3>${escapeHtml(concept.concept_name)}</h3><span class="pill">${escapeHtml(concept.concept_id)}</span></header>
-        <div class="grid">
-          ${field('target_angle', concept.target_angle)}
-          ${field('Creative ID', concept.creative_id)}
+      return `<article class="concept-card">
+        <div class="concept-card-header"><div><h3 class="concept-title">${escapeHtml(concept.concept_name)}</h3><p class="helper">${escapeHtml(concept.hook)}</p></div><span class="badge brand">${escapeHtml(concept.creative_id)}</span></div>
+        <div class="grid" style="padding:0 14px 14px">
+          ${field('角度', concept.target_angle)}
+          ${field('视频时长', form.duration.value || '15')}
+        </div>
+        <details><summary>展开详情</summary><div class="grid">
           ${field('hook', concept.hook)}
           ${field('15s_script', concept["15s_script"])}
           ${field('voiceover', concept.voiceover)}
@@ -1608,7 +1794,7 @@ def _homepage_html():
           ${field('facebook_primary_text', concept.facebook_primary_text)}
           ${field('facebook_headline', concept.facebook_headline)}
           ${field('facebook_description', concept.facebook_description)}
-        </div>
+        </div></details>
       </article>`;
     }
 
@@ -1664,7 +1850,7 @@ def _homepage_html():
       const audit = result["红线审核结果"] || {};
       statusBox.className = 'status blocked';
       statusBox.textContent = `BLOCKED：${(result["阻断原因"] || []).join('，')}`;
-      output.innerHTML = `<section class="section danger">
+      output.innerHTML = `<section class="panel danger">
         <h2>BLOCKED</h2>
         <p>BLOCKED 状态不展示素材卡片</p>
         <p>Saved to History · <a href="/history">View History</a></p>
@@ -1681,11 +1867,11 @@ def _homepage_html():
     }
 
     function renderRawJson(result) {
-      return `<details><summary>查看原始 JSON</summary><pre>${escapeHtml(JSON.stringify(result, null, 2))}</pre></details>`;
+      return `<section class="panel"><details><summary>Raw JSON</summary><pre>${escapeHtml(JSON.stringify(result, null, 2))}</pre></details></section>`;
     }
   </script>
 </body>
-</html>""".replace("__SHARED_STYLE__", _history_style()).replace("__TOP_NAV__", _top_nav("generate")).replace("__PRODUCT_PROFILE_REQUESTS__", json.dumps(profile_requests, ensure_ascii=False))
+</html>""".replace("__SHARED_STYLE__", _history_style()).replace("__TOP_NAV__", _top_nav("generate")).replace("__SHELL_END__", _shell_end()).replace("__PRODUCT_PROFILE_REQUESTS__", json.dumps(profile_requests, ensure_ascii=False))
 
 
 if __name__ == "__main__":
