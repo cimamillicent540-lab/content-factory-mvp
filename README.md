@@ -28,6 +28,7 @@ http://127.0.0.1:8000/
 
 - `/`：Generate Creatives，本地素材生成工作台。
 - `/history`：Generation History，查看生成记录和 BLOCKED 记录。
+- `/video-jobs`：Video Jobs，查看本地视频生产任务。
 - `/performance`：Performance CSV Analyzer，粘贴广告 CSV 并保存复盘报告。
 - `/performance/history`：Performance Reports，查看保存的 CSV 复盘。
 - `/performance/history/{report_id}`：Performance Report Detail，查看 Next Round Recommendations 和 Next Round Creative Brief Request。
@@ -62,6 +63,7 @@ OpenAI 模式只用于真实 LLM 接入测试，需要本地环境变量 `OPENAI
 - CLI：支持命令行直接跑完整流程。
 - HTTP API：支持外部系统通过接口调用。
 - Web UI：支持浏览器填写素材需求并查看结构化 JSON 结果。
+- Video Production Pipeline Foundation：支持从 Creative Concept 创建本地视频任务，占位展示 Preview / Download。
 
 ## 版本说明
 
@@ -260,6 +262,20 @@ GENERATED 详情页会展示可复制的 `Creative Brief Markdown`、`Copy Full 
 BLOCKED 详情页只展示阻断原因、risks、risk_explanation、safer_alternatives、next_actions 和 Raw JSON，不生成 Creative Brief，避免把未通过红线审核的内容误作为交付素材。
 
 这是本地 MVP history，用于单机演示、复盘和交付辅助，不是多用户 SaaS 存储，也没有登录、权限隔离或云端同步。
+
+## Video Production Pipeline Foundation
+
+Generated Creative Concepts can create local video production jobs from the Web UI or `POST /video-jobs`.
+
+V1 uses `FakeVideoProvider` for workflow validation only. It does not call Runway, does not call ElevenLabs, and does not execute real FFmpeg rendering. The goal is to validate the internal production flow:
+
+```text
+Creative Concept -> Generate Video -> Video Job -> COMPLETED -> Preview / Download placeholder
+```
+
+Video jobs are persisted in local SQLite through `video_generation_jobs`. Duplicate submit protection is included: if the same `generation_id + creative_id` already has an active or completed job, the existing job is returned instead of creating another one. Failed jobs can be retried by creating a new job.
+
+Real Runway image-to-video, ElevenLabs voice generation, reference image upload, and FFmpeg MP4 rendering are intentionally deferred to Task 20A.2.
 
 ## Product Profiles
 

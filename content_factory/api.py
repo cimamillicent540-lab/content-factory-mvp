@@ -4,6 +4,7 @@ import json
 import os
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs
 
 from content_factory.config import load_settings
 from content_factory.creative_workflow import attach_creative_ids, build_media_buyer_launch_brief
@@ -25,6 +26,11 @@ from content_factory.services import (
     record_performance_feedback,
     run_content_pipeline,
 )
+from content_factory.video_jobs import (
+    get_video_job,
+    list_video_jobs,
+    run_fake_video_job,
+)
 
 
 JSON_HEADERS = {"Content-Type": "application/json; charset=utf-8"}
@@ -36,6 +42,8 @@ class ContentFactoryAPI:
         self.conn = connect(database_path)
         init_db(self.conn)
         self.provider = create_provider()
+        base_dir = os.path.dirname(database_path) if database_path and database_path != ":memory:" else "outputs"
+        self.video_output_dir = os.path.join(base_dir or "outputs", "video_jobs")
 
     def handle(self, method, path, payload=None):
         if method == "GET" and path == "/":
@@ -43,6 +51,16 @@ class ContentFactoryAPI:
 
         if method == "GET" and path == "/performance":
             return 200, dict(HTML_HEADERS), _performance_html()
+
+        if method == "GET" and path == "/video-jobs":
+            return self._handle_video_jobs()
+
+        video_job_match = re.fullmatch(r"/video-jobs/(video-[A-Za-z0-9-]+)", path)
+        if method == "GET" and video_job_match:
+            return self._handle_video_job_detail(video_job_match.group(1))
+
+        if method == "POST" and path == "/video-jobs":
+            return self._handle_create_video_job(payload or {})
 
         if method == "POST" and path == "/performance":
             return self._handle_performance(payload or {})
@@ -217,7 +235,71 @@ class ContentFactoryAPI:
         if saved is None:
             return 404, dict(HTML_HEADERS), _history_not_found_html(history_id)
         generation_row = self.conn.execute("SELECT created_at FROM content_generations WHERE id = ?", (generation_id,)).fetchone()
-        return 200, dict(HTML_HEADERS), _generated_history_detail_html(generation_id, saved, generation_row["created_at"] if generation_row else "")
+        video_jobs = _video_jobs_for_generation(self.conn, generation_id)
+        return 200, dict(HTML_HEADERS), _generated_history_detail_html(generation_id, saved, generation_row["created_at"] if generation_row else "", video_jobs)
+
+    def _handle_create_video_job(self, payload):
+        try:
+            generation_id = int(payload.get("generation_id", 0))
+        except (TypeError, ValueError):
+            return self._json(400, {"status": "FAILED", "message": "generation_id 无效"})
+        creative_id = str(payload.get("creative_id", "")).strip()
+        if not creative_id:
+            return self._json(400, {"status": "FAILED", "message": "creative_id 不能为空"})
+
+        saved = get_generation_result(self.conn, generation_id)
+        if saved is None:
+            return self._json(404, {"status": "NOT_FOUND", "message": "生成记录不存在"})
+        concept = _find_concept_by_creative_id(self.conn, generation_id, saved, creative_id)
+        if concept is None:
+            return self._json(400, {"status": "FAILED", "message": "creative_id 不属于该 generation"})
+
+        request_data = {
+            "creative_id": creative_id,
+            "hook": concept.get("hook"),
+            "15s_script": concept.get("15s_script"),
+            "voiceover": concept.get("voiceover"),
+            "captions": concept.get("captions", []),
+            "visual_style": concept.get("visual_style"),
+            "runway_prompt": concept.get("runway_prompt"),
+            "elevenlabs_prompt": concept.get("elevenlabs_prompt"),
+            "facebook_headline": concept.get("facebook_headline"),
+            "compliance_notes": concept.get("compliance_notes"),
+            "reference_image_path": payload.get("reference_image_path") or "",
+            "aspect_ratio": payload.get("aspect_ratio") or "9:16",
+            "duration": payload.get("duration") or "15",
+            "voice_id": payload.get("voice_id") or "",
+            "cta": payload.get("cta") or "Learn More",
+            "compliance_footer": payload.get("compliance_footer") or "21+ or applicable legal age · Play Responsibly · Terms and Conditions Apply",
+        }
+        job = run_fake_video_job(
+            self.conn,
+            generation_id,
+            creative_id,
+            request_data=request_data,
+            output_root=self.video_output_dir,
+        )
+        return self._json(
+            200,
+            {
+                "status": job["status"],
+                "job_id": job["job_id"],
+                "generation_id": job["generation_id"],
+                "creative_id": job["creative_id"],
+                "duplicate": bool(job.get("duplicate")),
+                "job_url": f"/video-jobs/{job['job_id']}",
+                "final_mp4_path": job.get("final_mp4_path"),
+            },
+        )
+
+    def _handle_video_jobs(self):
+        return 200, dict(HTML_HEADERS), _video_jobs_html(list_video_jobs(self.conn))
+
+    def _handle_video_job_detail(self, job_id):
+        job = get_video_job(self.conn, job_id)
+        if job is None:
+            return 404, dict(HTML_HEADERS), _video_job_not_found_html(job_id)
+        return 200, dict(HTML_HEADERS), _video_job_detail_html(job)
 
     def _json(self, status, payload):
         return status, dict(JSON_HEADERS), json.dumps(payload, ensure_ascii=False, indent=2)
@@ -257,6 +339,8 @@ def run_server(database_path=None, host=None, port=None):
             if length == 0:
                 return {}
             raw = self.rfile.read(length).decode("utf-8")
+            if "application/x-www-form-urlencoded" in self.headers.get("Content-Type", ""):
+                return {key: values[-1] for key, values in parse_qs(raw).items()}
             return json.loads(raw)
 
     server = ThreadingHTTPServer((server_host, server_port), Handler)
@@ -452,7 +536,84 @@ def _history_html(rows):
 </main></body></html>"""
 
 
-def _generated_history_detail_html(generation_id, saved, created_at):
+def _video_jobs_for_generation(conn, generation_id):
+    jobs = conn.execute(
+        "SELECT * FROM video_generation_jobs WHERE generation_id = ? ORDER BY id DESC",
+        (generation_id,),
+    ).fetchall()
+    by_creative = {}
+    for row in jobs:
+        if row["creative_id"] not in by_creative:
+            item = dict(row)
+            item["request"] = loads_json(item.get("request_json"), {})
+            by_creative[row["creative_id"]] = item
+    return by_creative
+
+
+def _find_concept_by_creative_id(conn, generation_id, saved, creative_id):
+    row = conn.execute("SELECT created_at FROM content_generations WHERE id = ?", (generation_id,)).fetchone()
+    created_at = row["created_at"] if row else None
+    product = saved.get("product", {})
+    generation = saved.get("generation", {})
+    summary = generation.get("campaign_summary", {})
+    concepts = attach_creative_ids(
+        generation.get("video_ad_concepts", []),
+        product.get("name"),
+        summary.get("国家") or product.get("country"),
+        summary.get("平台") or product.get("platform"),
+        created_at,
+    )
+    return next((concept for concept in concepts if concept.get("creative_id") == creative_id), None)
+
+
+def _video_production_html(generation_id, concepts, video_jobs):
+    rows = []
+    for concept in concepts:
+        creative_id = concept.get("creative_id")
+        job = video_jobs.get(creative_id)
+        if job:
+            actions = [f'<a class="button button-secondary" href="/video-jobs/{_escape(job["job_id"])}">View Job</a>']
+            if job["status"] == "COMPLETED":
+                actions.append(f'<a class="button button-secondary" href="{_escape(job.get("final_mp4_path"))}">Preview Video</a>')
+                actions.append(f'<a class="button button-secondary" href="{_escape(job.get("final_mp4_path"))}" download>Download MP4</a>')
+            if job["status"] == "FAILED":
+                actions.append(_generate_video_form(generation_id, creative_id, "Generate Again"))
+            status_html = _video_status_badge(job["status"])
+            detail = f'<span class="helper">{_escape(job.get("error_message") or job.get("job_id"))}</span>'
+            action_html = "".join(actions)
+        else:
+            status_html = '<span class="badge">Status: Not generated</span>'
+            detail = '<span class="helper">Reference Image: Not required in Fake Mode</span>'
+            action_html = _generate_video_form(generation_id, creative_id, "Generate Video")
+        rows.append(
+            f"""<tr>
+              <td><strong>{_escape(creative_id)}</strong><br>{detail}</td>
+              <td>{status_html}</td>
+              <td>{action_html}</td>
+            </tr>"""
+        )
+    return f"""<section class="panel">
+      <h2>Video Production</h2>
+      <p class="helper">Fake provider mode only. No Runway, ElevenLabs, or FFmpeg calls are made in this foundation step.</p>
+      <div class="data-table-wrap"><table class="data-table">
+        <thead><tr><th>Creative ID</th><th>Video Status</th><th>Actions</th></tr></thead>
+        <tbody>{"".join(rows)}</tbody>
+      </table></div>
+    </section>"""
+
+
+def _generate_video_form(generation_id, creative_id, label):
+    return f"""<form method="post" action="/video-jobs" class="inline-form">
+      <input type="hidden" name="generation_id" value="{_escape(generation_id)}">
+      <input type="hidden" name="creative_id" value="{_escape(creative_id)}">
+      <input type="hidden" name="aspect_ratio" value="9:16">
+      <input type="hidden" name="duration" value="15">
+      <input type="hidden" name="cta" value="Learn More">
+      <button class="button-primary" type="submit">{_escape(label)}</button>
+    </form>"""
+
+
+def _generated_history_detail_html(generation_id, saved, created_at, video_jobs=None):
     brief = _creative_brief_markdown(saved, generation_id, created_at)
     generation = saved.get("generation", {})
     product = saved.get("product", {})
@@ -496,6 +657,7 @@ def _generated_history_detail_html(generation_id, saved, created_at):
         f"<p>elevenlabs_prompt: {_escape(concept.get('elevenlabs_prompt'))}</p></article>"
         for concept in concepts
     )
+    video_production = _video_production_html(generation_id, concepts, video_jobs or {})
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8"><title>Generation Detail</title>{_history_style()}</head>
@@ -518,6 +680,7 @@ def _generated_history_detail_html(generation_id, saved, created_at):
     {_kv_card("creative count", len(concepts))}
   </div></section>
   <section class="panel"><h2>素材概念</h2>{concept_cards}</section>
+  {video_production}
   <section class="panel"><h2>Creative Brief</h2><button class="button-secondary" type="button" onclick="copyFullBrief()">Copy Full Brief</button><textarea id="creative-brief-markdown" class="brief-copy-box" readonly>{_escape(brief)}</textarea></section>
   <section class="panel"><h2>Media Buyer Launch Brief</h2><button class="button-secondary" type="button" onclick="copyLaunchBrief()">Copy Launch Brief</button><textarea id="media-buyer-launch-brief" class="brief-copy-box launch-brief-copy-box" readonly>{_escape(launch_brief)}</textarea></section>
   <section class="panel"><h2>技术数据</h2><details><summary>Raw JSON</summary><pre>{_escape(json.dumps(raw_payload, ensure_ascii=False, indent=2))}</pre></details></section>
@@ -575,6 +738,88 @@ def _history_not_found_html(history_id):
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><title>History record not found</title>{_history_style()}</head>
 <body><main class="app-shell">{_top_nav("history")}<div class="empty-state"><h1>History record not found</h1><p>No saved generation history for {_escape(history_id)}.</p><a class="button button-secondary" href="/history">Back to History</a></div>{_shell_end()}</main></body></html>"""
+
+
+def _video_jobs_html(jobs):
+    if jobs:
+        rows = "".join(
+            f"""<tr>
+              <td><strong>{_escape(job.get("job_id"))}</strong></td>
+              <td>{_escape(job.get("creative_id"))}</td>
+              <td class="num">{_escape(job.get("generation_id"))}</td>
+              <td>{_video_status_badge(job.get("status"))}</td>
+              <td>{_escape(_friendly_datetime(job.get("created_at")))}</td>
+              <td><a class="button button-secondary" href="/video-jobs/{_escape(job.get("job_id"))}">View</a></td>
+            </tr>"""
+            for job in jobs
+        )
+        body = f"""<section class="panel">
+          <div class="data-table-wrap"><table class="data-table">
+            <thead><tr><th>Job ID</th><th>Creative ID</th><th class="num">Generation ID</th><th>Status</th><th>Created At</th><th>View</th></tr></thead>
+            <tbody>{rows}</tbody>
+          </table></div>
+        </section>"""
+    else:
+        body = """<div class="empty-state">
+          <h2>No video jobs yet.</h2>
+          <p>Create a generated creative first, then click Generate Video from the generation detail page.</p>
+          <a class="button button-primary" href="/history">Open Generation History</a>
+        </div>"""
+    return f"""<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>Video Jobs</title>{_history_style()}</head>
+<body><main class="app-shell">{_top_nav("video_jobs")}
+  <section class="page-header"><div><h1>Video Jobs</h1><p>Local fake video production jobs for workflow validation.</p></div></section>
+  {body}
+  {_shell_end()}
+</main></body></html>"""
+
+
+def _video_job_detail_html(job):
+    request_json = json.dumps(job.get("request", {}), ensure_ascii=False, indent=2)
+    completed = job.get("status") == "COMPLETED"
+    failed = job.get("status") == "FAILED"
+    preview = ""
+    if completed:
+        preview = f"""<section class="panel">
+          <h2>Preview Video</h2>
+          <p class="helper">Fake Mode placeholder. Real MP4 rendering arrives in Task 20A.2.</p>
+          <a class="button button-secondary" href="{_escape(job.get("final_mp4_path"))}">Preview Video</a>
+          <a class="button button-secondary" href="{_escape(job.get("final_mp4_path"))}" download>Download MP4</a>
+        </section>"""
+    if failed:
+        preview = f"""<section class="panel danger">
+          <h2>Error Message</h2>
+          <p>{_escape(job.get("error_message"))}</p>
+        </section>"""
+    return f"""<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>Video Production Job</title>{_history_style()}</head>
+<body><main class="app-shell">{_top_nav("video_jobs")}
+  <section class="page-header">
+    <div><h1>Video Production Job</h1><p>Fake video pipeline status and local placeholder assets.</p></div>
+    <div class="page-actions">{_video_status_badge(job.get("status"))}</div>
+  </section>
+  <section class="panel"><div class="grid">
+    {_kv_card("Job ID", job.get("job_id"))}
+    {_kv_card("Creative ID", job.get("creative_id"))}
+    {_kv_card("Generation ID", job.get("generation_id"))}
+    {_kv_card("Status", job.get("status"))}
+    {_kv_card("Created At", _friendly_datetime(job.get("created_at")))}
+    {_kv_card("Updated At", _friendly_datetime(job.get("updated_at")))}
+    {_kv_card("Runway Task ID", job.get("runway_task_id"))}
+    {_kv_card("Audio Path", job.get("audio_path"))}
+    {_kv_card("Video Path", job.get("video_path"))}
+    {_kv_card("Final MP4 Path", job.get("final_mp4_path"))}
+  </div></section>
+  {preview}
+  <section class="panel"><h2>Request Data</h2><details><summary>request_json</summary><pre>{_escape(request_json)}</pre></details></section>
+  {_shell_end()}
+</main></body></html>"""
+
+
+def _video_job_not_found_html(job_id):
+    return f"""<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>Video job not found</title>{_history_style()}</head>
+<body><main class="app-shell">{_top_nav("video_jobs")}<div class="empty-state"><h1>Video job not found</h1><p>No video job for {_escape(job_id)}.</p><a class="button button-secondary" href="/video-jobs">Back to Video Jobs</a></div>{_shell_end()}</main></body></html>"""
 
 
 def _history_style():
@@ -717,6 +962,7 @@ def _top_nav(active="generate"):
         ("dashboard", "工作台", "/", "dashboard"),
         ("generate", "素材生成", "/", "generate"),
         ("history", "生成记录", "/history", "history"),
+        ("video_jobs", "视频任务", "/video-jobs", "generate"),
         ("performance", "数据分析", "/performance", "performance"),
         ("performance_reports", "复盘报告", "/performance/history", "reports"),
     ]
@@ -724,6 +970,7 @@ def _top_nav(active="generate"):
         "dashboard": "工作台",
         "generate": "工作台",
         "history": "生成记录",
+        "video_jobs": "视频任务",
         "performance": "投放数据分析",
         "performance_reports": "复盘报告",
     }
@@ -765,6 +1012,18 @@ def _friendly_datetime(value):
 def _status_badge(status):
     css = "generated" if status == "GENERATED" else "blocked"
     return f'<span class="badge {css}">{_escape(status)}</span>'
+
+
+def _video_status_badge(status):
+    css_map = {
+        "PENDING": "",
+        "GENERATING_VIDEO": "brand",
+        "GENERATING_VOICE": "brand",
+        "COMPOSITING": "brand",
+        "COMPLETED": "generated",
+        "FAILED": "danger",
+    }
+    return f'<span class="badge {css_map.get(status, "")}">{_escape(status)}</span>'
 
 
 def _copy_script():
@@ -1589,6 +1848,7 @@ def _homepage_html():
       const concepts = enrichConcepts(content.video_ad_concepts || [], summary);
       const creativeBrief = renderCreativeBriefMarkdown(content, result);
       const launchBrief = renderMediaBuyerLaunchBrief(summary, concepts);
+      window.currentGenerationId = result.generation_id;
       statusBox.className = 'status generated';
       statusBox.textContent = `GENERATED generation_id=${result.generation_id} 素材内容`;
       output.innerHTML = `
@@ -1623,6 +1883,27 @@ def _homepage_html():
         await navigator.clipboard.writeText(target.value);
       } else {
         document.execCommand('copy');
+      }
+    }
+
+    async function generateVideoJob(creativeId) {
+      const response = await fetch('/video-jobs', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          generation_id: window.currentGenerationId,
+          creative_id: creativeId,
+          aspect_ratio: '9:16',
+          duration: form.duration.value || '15',
+          cta: 'Learn More',
+          compliance_footer: '21+ or applicable legal age · Play Responsibly · Terms and Conditions Apply'
+        })
+      });
+      const result = await response.json();
+      if (result.job_url) {
+        window.location.href = result.job_url;
+      } else {
+        alert(result.message || 'Video job failed');
       }
     }
 
@@ -1784,6 +2065,15 @@ def _homepage_html():
           ${field('角度', concept.target_angle)}
           ${field('视频时长', form.duration.value || '15')}
         </div>
+        <section class="field" style="margin:0 14px 14px">
+          <b>Video Production</b>
+          <div>Status: Not generated</div>
+          <div class="demo-actions">
+            <button class="button-secondary" type="button" onclick="generateVideoJob('${escapeHtml(concept.creative_id)}')">Select Concept</button>
+            <button class="button-primary" type="button" onclick="generateVideoJob('${escapeHtml(concept.creative_id)}')">Generate Video</button>
+            <span class="helper">Preview Video / Download MP4 will appear after completion.</span>
+          </div>
+        </section>
         <details><summary>展开详情</summary><div class="grid">
           ${field('hook', concept.hook)}
           ${field('15s_script', concept["15s_script"])}
