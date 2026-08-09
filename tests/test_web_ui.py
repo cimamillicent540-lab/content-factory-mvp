@@ -3,6 +3,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from content_factory.api import create_app
 
@@ -469,6 +470,11 @@ no_id_ad,10,1000,5
         self.assertIn("Download MP4", detail_body)
         self.assertIn(creative_id, detail_body)
 
+        file_status, file_headers, file_body = self.app.handle("GET", f'/video-jobs/{created["job_id"]}/final')
+        self.assertEqual(file_status, 200)
+        self.assertEqual(file_headers["Content-Type"], "video/mp4")
+        self.assertIn(b"fake final mp4 placeholder", file_body)
+
     def test_video_jobs_page_lists_recent_jobs(self):
         _status, _headers, body = self.app.handle("POST", "/generate", self._profile_request())
         generated = json.loads(body)
@@ -522,6 +528,82 @@ no_id_ad,10,1000,5
         self.assertIn("FAILED", body)
         self.assertIn("Error Message", body)
         self.assertIn("Runway failed", body)
+
+    def test_real_mode_missing_reference_image_is_rejected(self):
+        _status, _headers, body = self.app.handle("POST", "/generate", self._profile_request())
+        generated = json.loads(body)
+        creative_id = self._first_creative_id(generated)
+
+        with patch.dict("os.environ", {"VIDEO_PRODUCTION_PROVIDER": "real", "RUNWAY_API_KEY": "test", "ELEVENLABS_API_KEY": "test", "ELEVENLABS_VOICE_ID": "voice-1"}):
+            status, _headers, body = self.app.handle(
+                "POST",
+                "/video-jobs",
+                {"generation_id": generated["generation_id"], "creative_id": creative_id},
+            )
+
+        self.assertEqual(status, 400)
+        self.assertIn("verified reference image", body)
+
+    def test_real_mode_valid_reference_creates_pending_job_without_waiting(self):
+        _status, _headers, body = self.app.handle("POST", "/generate", self._profile_request())
+        generated = json.loads(body)
+        creative_id = self._first_creative_id(generated)
+
+        with patch.dict("os.environ", {"VIDEO_PRODUCTION_PROVIDER": "real", "RUNWAY_API_KEY": "test", "ELEVENLABS_API_KEY": "test", "ELEVENLABS_VOICE_ID": "voice-1"}):
+            with patch.object(self.app, "_start_real_video_job", return_value=None) as starter:
+                status, _headers, body = self.app.handle(
+                    "POST",
+                    "/video-jobs",
+                    {
+                        "generation_id": generated["generation_id"],
+                        "creative_id": creative_id,
+                        "voice_id": "voice-1",
+                        "_files": {"reference_image": {"filename": "reference.png", "content": b"\x89PNG\r\n\x1a\nfake"}},
+                    },
+                )
+
+        created = json.loads(body)
+        self.assertEqual(status, 202)
+        self.assertEqual(created["status"], "PENDING")
+        self.assertIn("/video-jobs/", created["job_url"])
+        starter.assert_called_once()
+
+    def test_active_job_detail_auto_refreshes_and_shows_steps(self):
+        from content_factory.video_jobs import create_video_job
+
+        created = create_video_job(self.app.conn, 1, "SPK-BR-FB-20260808-C001", {"production_mode": "REAL"})
+
+        status, _headers, body = self.app.handle("GET", f'/video-jobs/{created["job_id"]}')
+
+        self.assertEqual(status, 200)
+        self.assertIn("Production Steps", body)
+        self.assertIn("Reference", body)
+        self.assertIn("setTimeout", body)
+        self.assertIn("Production Mode", body)
+
+    def test_file_route_cannot_read_arbitrary_path(self):
+        from content_factory.video_jobs import create_video_job, update_video_job_status
+
+        created = create_video_job(self.app.conn, 1, "SPK-BR-FB-20260808-C001")
+        update_video_job_status(self.app.conn, created["job_id"], "COMPLETED", final_mp4_path="/etc/passwd")
+
+        status, _headers, body = self.app.handle("GET", f'/video-jobs/{created["job_id"]}/final')
+
+        self.assertEqual(status, 404)
+        self.assertIn("outside this job directory", body)
+
+    def test_real_mode_history_detail_shows_cost_warning_and_reference_upload(self):
+        _status, _headers, body = self.app.handle("POST", "/generate", self._profile_request())
+        generated = json.loads(body)
+
+        with patch.dict("os.environ", {"VIDEO_PRODUCTION_PROVIDER": "real"}):
+            status, _headers, body = self.app.handle("GET", f'/history/{generated["generation_id"]}')
+
+        self.assertEqual(status, 200)
+        self.assertIn("Generate Real Video", body)
+        self.assertIn("This action uses paid external AI services.", body)
+        self.assertIn('type="file"', body)
+        self.assertIn("Reference Image", body)
 
     def test_history_detail_missing_returns_clear_404(self):
         status, headers, body = self.app.handle("GET", "/history/999999")

@@ -11,8 +11,10 @@ from content_factory.video_jobs import (
     list_video_jobs,
     mark_video_job_failed,
     run_fake_video_job,
+    run_real_video_job,
     update_video_job_status,
 )
+from content_factory.voice_generation import FakeVoiceProvider
 
 
 class VideoJobTests(unittest.TestCase):
@@ -82,6 +84,88 @@ class VideoJobTests(unittest.TestCase):
         self.assertTrue(job["subtitle_path"].endswith("subtitles.srt"))
         self.assertTrue(job["final_mp4_path"].endswith("SPK-BR-FB-20260808-C001-V1.mp4"))
         self.assertTrue(os.path.exists(job["final_mp4_path"]))
+
+    def test_run_real_video_job_transitions_to_completed_and_saves_final_mp4(self):
+        reference = self._reference_png()
+        provider = FakeVideoProvider(task_id="real-task-001")
+        voice = FakeVoiceProvider()
+
+        job = run_real_video_job(
+            self.conn,
+            generation_id=1,
+            creative_id="SPK-BR-FB-20260808-C001",
+            request_data={
+                "reference_image_path": reference,
+                "runway_prompt": "vertical product walkthrough",
+                "voiceover": "This is the voiceover.",
+                "captions": ["This is the caption."],
+                "cta": "Learn More",
+                "compliance_footer": "21+ Play Responsibly",
+                "voice_id": "voice-1",
+            },
+            output_root=self.output_dir,
+            video_provider=provider,
+            voice_provider=voice,
+            composer=self._fake_composer,
+        )
+
+        self.assertEqual(job["status"], "COMPLETED")
+        self.assertEqual(job["runway_task_id"], "real-task-001")
+        self.assertTrue(os.path.exists(job["video_path"]))
+        self.assertTrue(os.path.exists(job["audio_path"]))
+        self.assertTrue(os.path.exists(job["subtitle_path"]))
+        self.assertTrue(os.path.exists(job["final_mp4_path"]))
+        self.assertEqual(job["request"]["production_mode"], "REAL")
+
+    def test_run_real_video_job_failure_marks_failed_and_preserves_artifacts(self):
+        reference = self._reference_png()
+
+        def failing_composer(*_args, **_kwargs):
+            raise RuntimeError("ffmpeg failed")
+
+        job = run_real_video_job(
+            self.conn,
+            generation_id=1,
+            creative_id="SPK-BR-FB-20260808-C001",
+            request_data={"reference_image_path": reference, "voiceover": "hello", "captions": ["hello"], "voice_id": "voice-1"},
+            output_root=self.output_dir,
+            video_provider=FakeVideoProvider(task_id="task-1"),
+            voice_provider=FakeVoiceProvider(),
+            composer=failing_composer,
+        )
+
+        self.assertEqual(job["status"], "FAILED")
+        self.assertIn("ffmpeg failed", job["error_message"])
+        self.assertTrue(os.path.exists(job["video_path"]))
+        self.assertTrue(os.path.exists(job["audio_path"]))
+        self.assertTrue(os.path.exists(job["subtitle_path"]))
+
+    def test_run_real_video_job_requires_reference_image(self):
+        job = run_real_video_job(
+            self.conn,
+            generation_id=1,
+            creative_id="SPK-BR-FB-20260808-C001",
+            request_data={"voiceover": "hello", "voice_id": "voice-1"},
+            output_root=self.output_dir,
+            video_provider=FakeVideoProvider(),
+            voice_provider=FakeVoiceProvider(),
+            composer=self._fake_composer,
+        )
+
+        self.assertEqual(job["status"], "FAILED")
+        self.assertIn("reference image", job["error_message"])
+
+    def _reference_png(self):
+        os.makedirs(self.output_dir, exist_ok=True)
+        path = os.path.join(self.tmpdir.name, "reference.png")
+        with open(path, "wb") as handle:
+            handle.write(b"\x89PNG\r\n\x1a\nfake")
+        return path
+
+    def _fake_composer(self, _video_path, _audio_path, _subtitle_path, output_path, **_kwargs):
+        with open(output_path, "wb") as handle:
+            handle.write(b"mp4")
+        return {"path": output_path}
 
 
 if __name__ == "__main__":
