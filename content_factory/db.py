@@ -169,6 +169,24 @@ def init_db(conn):
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
+        CREATE TABLE IF NOT EXISTS video_generation_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id TEXT UNIQUE NOT NULL,
+            generation_id INTEGER NOT NULL,
+            creative_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            reference_image_path TEXT,
+            runway_task_id TEXT,
+            audio_path TEXT,
+            video_path TEXT,
+            subtitle_path TEXT,
+            final_mp4_path TEXT,
+            request_json TEXT,
+            error_message TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
         CREATE TABLE IF NOT EXISTS reusable_patterns (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             source_type TEXT NOT NULL,

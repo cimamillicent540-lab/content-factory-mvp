@@ -389,6 +389,10 @@ no_id_ad,10,1000,5
         self.assertIn("# Creative Brief", body)
         self.assertIn("runway_prompt", body)
         self.assertIn("<details><summary>Raw JSON</summary>", body)
+        self.assertIn("Video Production", body)
+        self.assertIn("Generate Video", body)
+        self.assertIn("Status: Not generated", body)
+        self.assertIn('action="/video-jobs"', body)
 
     def test_profile_generated_output_preserves_history_and_product_facts_in_brief(self):
         _status, _headers, body = self.app.handle("POST", "/generate", self._profile_request())
@@ -421,6 +425,7 @@ no_id_ad,10,1000,5
         self.assertIn("风险原因", body)
         self.assertIn("风险说明", body)
         self.assertIn("<details><summary>Raw JSON</summary>", body)
+        self.assertNotIn("Video Production", body)
         self.assertNotIn("Creative Brief", body)
         self.assertNotIn("Creative ID", body)
         self.assertNotIn("Media Buyer Launch Brief", body)
@@ -437,6 +442,86 @@ no_id_ad,10,1000,5
         self.assertIn("Media Buyer Launch Brief", detail_body)
         self.assertIn("primary metric to watch", detail_body)
         self.assertIn("Decision Rules", detail_body)
+
+    def test_video_job_post_creates_completed_fake_job_and_detail(self):
+        _status, _headers, body = self.app.handle("POST", "/generate", self._profile_request())
+        generated = json.loads(body)
+        creative_id = self._first_creative_id(generated)
+
+        status, headers, body = self.app.handle(
+            "POST",
+            "/video-jobs",
+            {"generation_id": generated["generation_id"], "creative_id": creative_id},
+        )
+        created = json.loads(body)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Content-Type"], "application/json; charset=utf-8")
+        self.assertEqual(created["status"], "COMPLETED")
+        self.assertEqual(created["creative_id"], creative_id)
+        self.assertIn("/video-jobs/", created["job_url"])
+
+        status, _headers, detail_body = self.app.handle("GET", created["job_url"])
+        self.assertEqual(status, 200)
+        self.assertIn("Video Production Job", detail_body)
+        self.assertIn("COMPLETED", detail_body)
+        self.assertIn("Preview Video", detail_body)
+        self.assertIn("Download MP4", detail_body)
+        self.assertIn(creative_id, detail_body)
+
+    def test_video_jobs_page_lists_recent_jobs(self):
+        _status, _headers, body = self.app.handle("POST", "/generate", self._profile_request())
+        generated = json.loads(body)
+        creative_id = self._first_creative_id(generated)
+        _status, _headers, body = self.app.handle(
+            "POST",
+            "/video-jobs",
+            {"generation_id": generated["generation_id"], "creative_id": creative_id},
+        )
+        job = json.loads(body)
+
+        status, _headers, body = self.app.handle("GET", "/video-jobs")
+
+        self.assertEqual(status, 200)
+        self.assertIn("Video Jobs", body)
+        self.assertIn(job["job_id"], body)
+        self.assertIn(creative_id, body)
+        self.assertIn("COMPLETED", body)
+        self.assertIn("View", body)
+
+    def test_video_job_duplicate_post_returns_existing_job(self):
+        _status, _headers, body = self.app.handle("POST", "/generate", self._profile_request())
+        generated = json.loads(body)
+        creative_id = self._first_creative_id(generated)
+
+        _status, _headers, first_body = self.app.handle(
+            "POST",
+            "/video-jobs",
+            {"generation_id": generated["generation_id"], "creative_id": creative_id},
+        )
+        _status, _headers, second_body = self.app.handle(
+            "POST",
+            "/video-jobs",
+            {"generation_id": generated["generation_id"], "creative_id": creative_id},
+        )
+
+        first = json.loads(first_body)
+        second = json.loads(second_body)
+        self.assertEqual(second["job_id"], first["job_id"])
+        self.assertTrue(second["duplicate"])
+
+    def test_failed_video_job_detail_shows_clear_error(self):
+        from content_factory.video_jobs import create_video_job, mark_video_job_failed
+
+        created = create_video_job(self.app.conn, 1, "SPK-BR-FB-20260808-C001")
+        failed = mark_video_job_failed(self.app.conn, created["job_id"], "Runway failed")
+
+        status, _headers, body = self.app.handle("GET", f'/video-jobs/{failed["job_id"]}')
+
+        self.assertEqual(status, 200)
+        self.assertIn("FAILED", body)
+        self.assertIn("Error Message", body)
+        self.assertIn("Runway failed", body)
 
     def test_history_detail_missing_returns_clear_404(self):
         status, headers, body = self.app.handle("GET", "/history/999999")
@@ -502,6 +587,16 @@ SPK-BR-FB-20260628-C003,20,3000,70,60,0,0,1000,650,300
         marker = "/performance/history/"
         start = body.index(marker) + len(marker)
         return body[start : body.index('"', start)]
+
+    def _first_creative_id(self, generated):
+        concept = generated["素材内容"]["video_ad_concepts"][0]
+        row = self.app.conn.execute(
+            "SELECT created_at FROM content_generations WHERE id = ?",
+            (generated["generation_id"],),
+        ).fetchone()
+        compact_date = row["created_at"][:10].replace("-", "")
+        concept_number = int(concept["concept_id"].replace("C", ""))
+        return f"SPK-BR-FB-{compact_date}-C{concept_number:03d}"
 
     def _profile_request(self):
         request = self._valid_request()
