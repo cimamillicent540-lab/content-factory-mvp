@@ -263,19 +263,53 @@ BLOCKED 详情页只展示阻断原因、risks、risk_explanation、safer_altern
 
 这是本地 MVP history，用于单机演示、复盘和交付辅助，不是多用户 SaaS 存储，也没有登录、权限隔离或云端同步。
 
-## Video Production Pipeline Foundation
+## Real Video Production
 
-Generated Creative Concepts can create local video production jobs from the Web UI or `POST /video-jobs`.
+Generated Creative Concepts can create local video production jobs from the Web UI or `POST /video-jobs`. The default mode remains safe local fake production:
 
-V1 uses `FakeVideoProvider` for workflow validation only. It does not call Runway, does not call ElevenLabs, and does not execute real FFmpeg rendering. The goal is to validate the internal production flow:
+```bash
+export VIDEO_PRODUCTION_PROVIDER=fake
+```
+
+Fake mode does not call Runway, does not call ElevenLabs, and does not execute real FFmpeg rendering. It is used for tests, demos and UI validation.
+
+Real mode must be explicitly enabled and requires a verified product Reference Image. Users must click `Generate Real Video`; GET requests, page refreshes, History pages and Video Job detail pages do not create paid API calls.
 
 ```text
-Creative Concept -> Generate Video -> Video Job -> COMPLETED -> Preview / Download placeholder
+Creative Concept -> Reference Image -> Runway image-to-video -> ElevenLabs voiceover -> SRT subtitles -> FFmpeg MP4 -> Preview / Download
 ```
 
 Video jobs are persisted in local SQLite through `video_generation_jobs`. Duplicate submit protection is included: if the same `generation_id + creative_id` already has an active or completed job, the existing job is returned instead of creating another one. Failed jobs can be retried by creating a new job.
 
-Real Runway image-to-video, ElevenLabs voice generation, reference image upload, and FFmpeg MP4 rendering are intentionally deferred to Task 20A.2.
+Real mode uses environment variables only. Never commit API keys, SQLite files or generated `outputs/` files to Git.
+
+```bash
+read -s "RUNWAY_API_KEY?Runway API Key: "
+echo
+export RUNWAY_API_KEY
+
+read -s "ELEVENLABS_API_KEY?ElevenLabs API Key: "
+echo
+export ELEVENLABS_API_KEY
+
+read "ELEVENLABS_VOICE_ID?ElevenLabs Voice ID: "
+export ELEVENLABS_VOICE_ID
+
+export RUNWAY_MODEL="gen4_turbo"
+export ELEVENLABS_MODEL_ID="eleven_multilingual_v2"
+export VIDEO_PRODUCTION_PROVIDER=real
+CONTENT_FACTORY_PROVIDER=openai python3 -m content_factory.api --host 127.0.0.1 --port 8000
+```
+
+Reference Images support PNG, JPG, JPEG and WEBP up to 10MB. Uploaded files are saved under `outputs/video_jobs/{job_id}/reference.*` with safe internal names. The system does not generate fake product UI, fake logos or fake offer screenshots.
+
+Completed jobs expose controlled asset routes:
+
+- `/video-jobs/{job_id}/final`
+- `/video-jobs/{job_id}/voice`
+- `/video-jobs/{job_id}/subtitles`
+
+These routes only serve files already recorded for that job and located under that job's local output directory.
 
 ## Product Profiles
 

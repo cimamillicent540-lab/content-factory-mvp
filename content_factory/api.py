@@ -1,14 +1,17 @@
 import argparse
+import cgi
 import html
 import json
 import os
 import re
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlparse
 
 from content_factory.config import load_settings
 from content_factory.creative_workflow import attach_creative_ids, build_media_buyer_launch_brief
 from content_factory.db import connect, init_db, loads_json
+from content_factory.file_storage import FileValidationError, safe_job_file, save_reference_image
 from content_factory.next_round_recommendations import (
     build_next_round_recommendations,
     next_round_plan_markdown,
@@ -27,9 +30,12 @@ from content_factory.services import (
     run_content_pipeline,
 )
 from content_factory.video_jobs import (
+    create_video_job,
     get_video_job,
     list_video_jobs,
     run_fake_video_job,
+    run_real_video_job,
+    update_video_job_request,
 )
 
 
@@ -39,6 +45,7 @@ HTML_HEADERS = {"Content-Type": "text/html; charset=utf-8"}
 
 class ContentFactoryAPI:
     def __init__(self, database_path):
+        self.database_path = database_path
         self.conn = connect(database_path)
         init_db(self.conn)
         self.provider = create_provider()
@@ -46,6 +53,7 @@ class ContentFactoryAPI:
         self.video_output_dir = os.path.join(base_dir or "outputs", "video_jobs")
 
     def handle(self, method, path, payload=None):
+        path = urlparse(path).path
         if method == "GET" and path == "/":
             return 200, dict(HTML_HEADERS), _homepage_html()
 
@@ -58,6 +66,10 @@ class ContentFactoryAPI:
         video_job_match = re.fullmatch(r"/video-jobs/(video-[A-Za-z0-9-]+)", path)
         if method == "GET" and video_job_match:
             return self._handle_video_job_detail(video_job_match.group(1))
+
+        video_file_match = re.fullmatch(r"/video-jobs/(video-[A-Za-z0-9-]+)/(final|voice|subtitles)", path)
+        if method == "GET" and video_file_match:
+            return self._handle_video_job_file(video_file_match.group(1), video_file_match.group(2))
 
         if method == "POST" and path == "/video-jobs":
             return self._handle_create_video_job(payload or {})
@@ -239,6 +251,7 @@ class ContentFactoryAPI:
         return 200, dict(HTML_HEADERS), _generated_history_detail_html(generation_id, saved, generation_row["created_at"] if generation_row else "", video_jobs)
 
     def _handle_create_video_job(self, payload):
+        files = payload.get("_files", {}) if isinstance(payload, dict) else {}
         try:
             generation_id = int(payload.get("generation_id", 0))
         except (TypeError, ValueError):
@@ -272,25 +285,37 @@ class ContentFactoryAPI:
             "cta": payload.get("cta") or "Learn More",
             "compliance_footer": payload.get("compliance_footer") or "21+ or applicable legal age · Play Responsibly · Terms and Conditions Apply",
         }
-        job = run_fake_video_job(
-            self.conn,
-            generation_id,
-            creative_id,
-            request_data=request_data,
-            output_root=self.video_output_dir,
-        )
-        return self._json(
-            200,
-            {
-                "status": job["status"],
-                "job_id": job["job_id"],
-                "generation_id": job["generation_id"],
-                "creative_id": job["creative_id"],
-                "duplicate": bool(job.get("duplicate")),
-                "job_url": f"/video-jobs/{job['job_id']}",
-                "final_mp4_path": job.get("final_mp4_path"),
-            },
-        )
+        mode = _video_production_provider()
+        if mode == "fake":
+            job = run_fake_video_job(
+                self.conn,
+                generation_id,
+                creative_id,
+                request_data={**request_data, "production_mode": "FAKE"},
+                output_root=self.video_output_dir,
+            )
+            return self._video_job_response(job, payload, status_code=200)
+        if mode != "real":
+            return self._json(400, {"status": "FAILED", "message": "VIDEO_PRODUCTION_PROVIDER must be fake or real."})
+
+        config_error = _real_video_config_error(payload.get("voice_id") or "")
+        if config_error:
+            return self._json(400, {"status": "FAILED", "message": config_error})
+
+        upload = files.get("reference_image") or files.get("reference_image_file") or payload.get("reference_image_file")
+        if not upload:
+            return self._json(400, {"status": "FAILED", "message": "A verified reference image is required for real video generation."})
+
+        job = create_video_job(self.conn, generation_id, creative_id, {**request_data, "production_mode": "REAL"})
+        if not job.get("duplicate"):
+            try:
+                reference_path = save_reference_image(upload, job["job_id"], self.video_output_dir)
+            except FileValidationError as exc:
+                return self._json(400, {"status": "FAILED", "message": str(exc)})
+            request_data = {**request_data, "reference_image_path": reference_path, "production_mode": "REAL"}
+            job = update_video_job_request(self.conn, job["job_id"], request_data)
+            self._start_real_video_job(job["job_id"])
+        return self._video_job_response(job, payload, status_code=202)
 
     def _handle_video_jobs(self):
         return 200, dict(HTML_HEADERS), _video_jobs_html(list_video_jobs(self.conn))
@@ -300,6 +325,54 @@ class ContentFactoryAPI:
         if job is None:
             return 404, dict(HTML_HEADERS), _video_job_not_found_html(job_id)
         return 200, dict(HTML_HEADERS), _video_job_detail_html(job)
+
+    def _handle_video_job_file(self, job_id, kind):
+        job = get_video_job(self.conn, job_id)
+        if job is None:
+            return self._json(404, {"status": "NOT_FOUND", "message": "Video job not found"})
+        field = {"final": "final_mp4_path", "voice": "audio_path", "subtitles": "subtitle_path"}[kind]
+        try:
+            file_path = safe_job_file(job, field, self.video_output_dir)
+        except FileValidationError as exc:
+            return self._json(404, {"status": "NOT_FOUND", "message": str(exc)})
+        content_type = {"final": "video/mp4", "voice": "audio/mpeg", "subtitles": "text/plain; charset=utf-8"}[kind]
+        filename = os.path.basename(file_path)
+        disposition = "inline" if kind == "final" else "attachment"
+        with open(file_path, "rb") as handle:
+            body = handle.read()
+        return 200, {"Content-Type": content_type, "Content-Disposition": f'{disposition}; filename="{filename}"'}, body
+
+    def _video_job_response(self, job, payload, status_code=200):
+        response = {
+            "status": job["status"],
+            "job_id": job["job_id"],
+            "generation_id": job["generation_id"],
+            "creative_id": job["creative_id"],
+            "duplicate": bool(job.get("duplicate")),
+            "job_url": f"/video-jobs/{job['job_id']}",
+            "final_mp4_path": job.get("final_mp4_path"),
+        }
+        if payload.get("_form_submit"):
+            return 303, {"Location": response["job_url"], "Content-Type": "text/html; charset=utf-8"}, f'<a href="{_escape(response["job_url"])}">Open Video Job</a>'
+        return self._json(status_code, response)
+
+    def _start_real_video_job(self, job_id):
+        if self.database_path == ":memory:":
+            job = get_video_job(self.conn, job_id)
+            run_real_video_job(self.conn, job["generation_id"], job["creative_id"], job.get("request", {}), output_root=self.video_output_dir, existing_job_id=job_id)
+            return
+
+        def worker():
+            conn = connect(self.database_path)
+            init_db(conn)
+            try:
+                job = get_video_job(conn, job_id)
+                if job:
+                    run_real_video_job(conn, job["generation_id"], job["creative_id"], job.get("request", {}), output_root=self.video_output_dir, existing_job_id=job_id)
+            finally:
+                conn.close()
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _json(self, status, payload):
         return status, dict(JSON_HEADERS), json.dumps(payload, ensure_ascii=False, indent=2)
@@ -324,9 +397,9 @@ def run_server(database_path=None, host=None, port=None):
             self._dispatch("POST")
 
         def _dispatch(self, method):
-            payload = self._read_json() if method == "POST" else None
+            payload = self._read_payload() if method == "POST" else None
             status, headers, body = app.handle(method, self.path, payload)
-            encoded = body.encode("utf-8")
+            encoded = body if isinstance(body, (bytes, bytearray)) else body.encode("utf-8")
             self.send_response(status)
             for key, value in headers.items():
                 self.send_header(key, value)
@@ -334,12 +407,33 @@ def run_server(database_path=None, host=None, port=None):
             self.end_headers()
             self.wfile.write(encoded)
 
-        def _read_json(self):
+        def _read_payload(self):
             length = int(self.headers.get("Content-Length", "0") or 0)
             if length == 0:
                 return {}
+            content_type = self.headers.get("Content-Type", "")
+            if "multipart/form-data" in content_type:
+                form = cgi.FieldStorage(
+                    fp=self.rfile,
+                    headers=self.headers,
+                    environ={"REQUEST_METHOD": "POST", "CONTENT_TYPE": content_type, "CONTENT_LENGTH": str(length)},
+                )
+                payload = {"_files": {}}
+                for key in form.keys():
+                    item = form[key]
+                    if isinstance(item, list):
+                        item = item[-1]
+                    if getattr(item, "filename", None):
+                        payload["_files"][key] = {
+                            "filename": item.filename,
+                            "content": item.file.read(),
+                            "content_type": item.type,
+                        }
+                    else:
+                        payload[key] = item.value
+                return payload
             raw = self.rfile.read(length).decode("utf-8")
-            if "application/x-www-form-urlencoded" in self.headers.get("Content-Type", ""):
+            if "application/x-www-form-urlencoded" in content_type:
                 return {key: values[-1] for key, values in parse_qs(raw).items()}
             return json.loads(raw)
 
@@ -360,6 +454,20 @@ def main(argv=None):
 def _load_demand(conn, demand_id):
     row = conn.execute("SELECT structured_json FROM demand_intakes WHERE id = ?", (demand_id,)).fetchone()
     return json.loads(row["structured_json"]) if row else {}
+
+
+def _video_production_provider():
+    return (os.environ.get("VIDEO_PRODUCTION_PROVIDER") or "fake").strip().lower()
+
+
+def _real_video_config_error(voice_id):
+    if not os.environ.get("RUNWAY_API_KEY"):
+        return "RUNWAY_API_KEY is required when VIDEO_PRODUCTION_PROVIDER=real."
+    if not os.environ.get("ELEVENLABS_API_KEY"):
+        return "ELEVENLABS_API_KEY is required when VIDEO_PRODUCTION_PROVIDER=real."
+    if not (voice_id or os.environ.get("ELEVENLABS_VOICE_ID")):
+        return "ELEVENLABS_VOICE_ID is required when VIDEO_PRODUCTION_PROVIDER=real."
+    return ""
 
 
 def _default_performance_metrics():
@@ -568,23 +676,25 @@ def _find_concept_by_creative_id(conn, generation_id, saved, creative_id):
 
 def _video_production_html(generation_id, concepts, video_jobs):
     rows = []
+    mode = _video_production_provider().upper()
     for concept in concepts:
         creative_id = concept.get("creative_id")
         job = video_jobs.get(creative_id)
         if job:
             actions = [f'<a class="button button-secondary" href="/video-jobs/{_escape(job["job_id"])}">View Job</a>']
             if job["status"] == "COMPLETED":
-                actions.append(f'<a class="button button-secondary" href="{_escape(job.get("final_mp4_path"))}">Preview Video</a>')
-                actions.append(f'<a class="button button-secondary" href="{_escape(job.get("final_mp4_path"))}" download>Download MP4</a>')
+                actions.append('<span class="helper">Existing completed video found.</span>')
+                actions.append(f'<a class="button button-secondary" href="/video-jobs/{_escape(job["job_id"])}/final">Preview Video</a>')
+                actions.append(f'<a class="button button-secondary" href="/video-jobs/{_escape(job["job_id"])}/final" download>Download MP4</a>')
             if job["status"] == "FAILED":
-                actions.append(_generate_video_form(generation_id, creative_id, "Generate Again"))
+                actions.append(_generate_video_form(generation_id, creative_id, "Generate Real Video" if mode == "REAL" else "Generate Again"))
             status_html = _video_status_badge(job["status"])
             detail = f'<span class="helper">{_escape(job.get("error_message") or job.get("job_id"))}</span>'
             action_html = "".join(actions)
         else:
             status_html = '<span class="badge">Status: Not generated</span>'
-            detail = '<span class="helper">Reference Image: Not required in Fake Mode</span>'
-            action_html = _generate_video_form(generation_id, creative_id, "Generate Video")
+            detail = f'<span class="helper">Production Mode: {mode}</span>'
+            action_html = _generate_video_form(generation_id, creative_id, "Generate Real Video" if mode == "REAL" else "Generate Video")
         rows.append(
             f"""<tr>
               <td><strong>{_escape(creative_id)}</strong><br>{detail}</td>
@@ -594,7 +704,7 @@ def _video_production_html(generation_id, concepts, video_jobs):
         )
     return f"""<section class="panel">
       <h2>Video Production</h2>
-      <p class="helper">Fake provider mode only. No Runway, ElevenLabs, or FFmpeg calls are made in this foundation step.</p>
+      <p class="helper">Production Mode: {mode}. Real mode requires a verified Reference Image and explicit confirmation before paid external AI services are used.</p>
       <div class="data-table-wrap"><table class="data-table">
         <thead><tr><th>Creative ID</th><th>Video Status</th><th>Actions</th></tr></thead>
         <tbody>{"".join(rows)}</tbody>
@@ -603,12 +713,27 @@ def _video_production_html(generation_id, concepts, video_jobs):
 
 
 def _generate_video_form(generation_id, creative_id, label):
-    return f"""<form method="post" action="/video-jobs" class="inline-form">
+    mode = _video_production_provider()
+    warning = ""
+    reference = ""
+    if mode == "real":
+        reference = """<label class="helper">Reference Image
+        <input type="file" name="reference_image" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" required>
+      </label>"""
+        warning = '<p class="helper danger-text">This action uses paid external AI services.</p>'
+    return f"""<form method="post" action="/video-jobs" class="inline-form" enctype="multipart/form-data" onsubmit="this.querySelector('button').disabled=true;">
       <input type="hidden" name="generation_id" value="{_escape(generation_id)}">
       <input type="hidden" name="creative_id" value="{_escape(creative_id)}">
+      <input type="hidden" name="_form_submit" value="1">
       <input type="hidden" name="aspect_ratio" value="9:16">
       <input type="hidden" name="duration" value="15">
-      <input type="hidden" name="cta" value="Learn More">
+      {reference}
+      <label class="helper">CTA <input name="cta" value="Learn More"></label>
+      <label class="helper">Compliance Text <textarea name="compliance_footer">21+ or applicable legal age
+Play Responsibly
+Terms and Conditions Apply
+Available only in eligible locations</textarea></label>
+      {warning}
       <button class="button-primary" type="submit">{_escape(label)}</button>
     </form>"""
 
@@ -778,30 +903,39 @@ def _video_job_detail_html(job):
     request_json = json.dumps(job.get("request", {}), ensure_ascii=False, indent=2)
     completed = job.get("status") == "COMPLETED"
     failed = job.get("status") == "FAILED"
+    active = job.get("status") in {"PENDING", "GENERATING_VIDEO", "GENERATING_VOICE", "COMPOSITING"}
+    mode = (job.get("request", {}) or {}).get("production_mode") or "FAKE"
+    refresh = '<script>setTimeout(() => window.location.reload(), 5000);</script>' if active else ""
     preview = ""
     if completed:
         preview = f"""<section class="panel">
           <h2>Preview Video</h2>
-          <p class="helper">Fake Mode placeholder. Real MP4 rendering arrives in Task 20A.2.</p>
-          <a class="button button-secondary" href="{_escape(job.get("final_mp4_path"))}">Preview Video</a>
-          <a class="button button-secondary" href="{_escape(job.get("final_mp4_path"))}" download>Download MP4</a>
+          <video controls preload="metadata" style="width:min(360px,100%);background:#111;border-radius:8px" src="/video-jobs/{_escape(job.get("job_id"))}/final"></video>
+          <div class="demo-actions">
+            <a class="button button-secondary" href="/video-jobs/{_escape(job.get("job_id"))}/final">Preview Video</a>
+            <a class="button button-secondary" href="/video-jobs/{_escape(job.get("job_id"))}/final" download>Download MP4</a>
+            <a class="button button-secondary" href="/video-jobs/{_escape(job.get("job_id"))}/voice" download>Download Voiceover</a>
+            <a class="button button-secondary" href="/video-jobs/{_escape(job.get("job_id"))}/subtitles" download>Download Subtitles</a>
+          </div>
         </section>"""
     if failed:
         preview = f"""<section class="panel danger">
           <h2>Error Message</h2>
           <p>{_escape(job.get("error_message"))}</p>
+          <p class="helper">Existing artifacts are preserved: {_escape(_existing_artifacts(job))}</p>
         </section>"""
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><title>Video Production Job</title>{_history_style()}</head>
 <body><main class="app-shell">{_top_nav("video_jobs")}
   <section class="page-header">
-    <div><h1>Video Production Job</h1><p>Fake video pipeline status and local placeholder assets.</p></div>
+    <div><h1>Video Production Job</h1><p>Creative concept production status, preview and controlled downloads.</p></div>
     <div class="page-actions">{_video_status_badge(job.get("status"))}</div>
   </section>
   <section class="panel"><div class="grid">
     {_kv_card("Job ID", job.get("job_id"))}
     {_kv_card("Creative ID", job.get("creative_id"))}
     {_kv_card("Generation ID", job.get("generation_id"))}
+    {_kv_card("Production Mode", mode)}
     {_kv_card("Status", job.get("status"))}
     {_kv_card("Created At", _friendly_datetime(job.get("created_at")))}
     {_kv_card("Updated At", _friendly_datetime(job.get("updated_at")))}
@@ -810,8 +944,10 @@ def _video_job_detail_html(job):
     {_kv_card("Video Path", job.get("video_path"))}
     {_kv_card("Final MP4 Path", job.get("final_mp4_path"))}
   </div></section>
+  <section class="panel"><h2>Production Steps</h2>{_production_steps_html(job.get("status"))}</section>
   {preview}
   <section class="panel"><h2>Request Data</h2><details><summary>request_json</summary><pre>{_escape(request_json)}</pre></details></section>
+  {refresh}
   {_shell_end()}
 </main></body></html>"""
 
@@ -820,6 +956,32 @@ def _video_job_not_found_html(job_id):
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><title>Video job not found</title>{_history_style()}</head>
 <body><main class="app-shell">{_top_nav("video_jobs")}<div class="empty-state"><h1>Video job not found</h1><p>No video job for {_escape(job_id)}.</p><a class="button button-secondary" href="/video-jobs">Back to Video Jobs</a></div>{_shell_end()}</main></body></html>"""
+
+
+def _production_steps_html(status):
+    steps = [
+        ("PENDING", "Reference"),
+        ("GENERATING_VIDEO", "Visual"),
+        ("GENERATING_VOICE", "Voice"),
+        ("COMPOSITING", "Captions + Composite"),
+        ("COMPLETED", "Ready"),
+    ]
+    current_index = next((index for index, (step_status, _label) in enumerate(steps) if step_status == status), len(steps) - 1 if status == "COMPLETED" else 0)
+    items = []
+    for index, (_step_status, label) in enumerate(steps):
+        badge = "generated" if status == "COMPLETED" or index <= current_index else ""
+        items.append(f'<span class="badge {badge}">{_escape(label)}</span>')
+    if status == "FAILED":
+        items.append('<span class="badge blocked">FAILED</span>')
+    return f'<div class="demo-actions">{"".join(items)}</div>'
+
+
+def _existing_artifacts(job):
+    labels = []
+    for label, key in (("reference", "reference_image_path"), ("video", "video_path"), ("voice", "audio_path"), ("subtitles", "subtitle_path"), ("final", "final_mp4_path")):
+        if job.get(key):
+            labels.append(label)
+    return ", ".join(labels) or "none"
 
 
 def _history_style():
@@ -1887,17 +2049,22 @@ def _homepage_html():
     }
 
     async function generateVideoJob(creativeId) {
+      const referenceInput = document.getElementById(`reference-${creativeId}`);
+      const ctaInput = document.getElementById(`cta-${creativeId}`);
+      const complianceInput = document.getElementById(`compliance-${creativeId}`);
+      const formData = new FormData();
+      formData.append('generation_id', window.currentGenerationId);
+      formData.append('creative_id', creativeId);
+      formData.append('aspect_ratio', '9:16');
+      formData.append('duration', form.duration.value || '15');
+      formData.append('cta', ctaInput ? ctaInput.value : 'Learn More');
+      formData.append('compliance_footer', complianceInput ? complianceInput.value : '21+ or applicable legal age · Play Responsibly · Terms and Conditions Apply');
+      if (referenceInput && referenceInput.files && referenceInput.files[0]) {
+        formData.append('reference_image', referenceInput.files[0]);
+      }
       const response = await fetch('/video-jobs', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          generation_id: window.currentGenerationId,
-          creative_id: creativeId,
-          aspect_ratio: '9:16',
-          duration: form.duration.value || '15',
-          cta: 'Learn More',
-          compliance_footer: '21+ or applicable legal age · Play Responsibly · Terms and Conditions Apply'
-        })
+        body: formData
       });
       const result = await response.json();
       if (result.job_url) {
@@ -2068,6 +2235,13 @@ def _homepage_html():
         <section class="field" style="margin:0 14px 14px">
           <b>Video Production</b>
           <div>Status: Not generated</div>
+          <label class="helper">Reference Image <input id="reference-${escapeHtml(concept.creative_id)}" type="file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"></label>
+          <label class="helper">CTA <input id="cta-${escapeHtml(concept.creative_id)}" value="Learn More"></label>
+          <label class="helper">Compliance Text <textarea id="compliance-${escapeHtml(concept.creative_id)}">21+ or applicable legal age
+Play Responsibly
+Terms and Conditions Apply
+Available only in eligible locations</textarea></label>
+          <p class="helper">Real mode requires a verified product reference image. This action uses paid external AI services.</p>
           <div class="demo-actions">
             <button class="button-secondary" type="button" onclick="generateVideoJob('${escapeHtml(concept.creative_id)}')">Select Concept</button>
             <button class="button-primary" type="button" onclick="generateVideoJob('${escapeHtml(concept.creative_id)}')">Generate Video</button>
